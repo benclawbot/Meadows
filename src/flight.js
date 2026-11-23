@@ -35,12 +35,12 @@ export function terrain(x, z) {
   return hills + dunes - inlet - sea - outerShore;
 }
 
-const gold = { color: 0xf7b84b, voice: 'harp' };
-const coral = { color: 0xee8a7b, voice: 'piano' };
+const gold = { color: 0xf7b437, voice: 'harp' };
+const coral = { color: 0xf67365, voice: 'piano' };
 const cream = { color: 0xffedd4, voice: 'piano' };
-const lavender = { color: 0xb09bea, voice: 'flute' };
-const blue = { color: 0x89a9ef, voice: 'flute' };
-const rose = { color: 0xda8eac, voice: 'piano' };
+const lavender = { color: 0xc5afea, voice: 'flute' };
+const blue = { color: 0xa7c4ef, voice: 'flute' };
+const rose = { color: 0xde5089, voice: 'piano' };
 const patches = [
   { x: -3, z: -13, name: 'The shallows', palette: [gold, coral, cream, lavender], start: [1, 2], end: [-8, -27] },
   { x: -24, z: -45, name: 'The reed banks', palette: [coral, cream, blue, gold, rose], start: [-12, -29], end: [-20, -61] },

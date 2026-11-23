@@ -20,7 +20,7 @@ As each of the three patches comes into bloom, more instruments join the chamber
 ### Play
 
 - Desktop mouse. Move away from the centre of the game to steer, and hold the left button for a gust. Arrow keys or WASD also steer. Space adds a gust. Press Esc or P to pause.
-- Phone. Open the game over HTTPS, tap **Begin drifting**, and allow motion access if asked. Hold the phone at a comfortable angle to set your neutral position. Tilt to steer and hold a thumb against the meadow for a gust. You can recenter in **Pause** or switch to touch steering.
+- Phone. Open the game over HTTPS, tap **Begin drifting**, and allow motion access if asked. Hold the phone at a comfortable angle to set your neutral position. Tilt to steer and hold a thumb against the meadow for a gust. Tap **Reset tilt** during flight or in **Pause** to set a new neutral angle. You can switch to touch steering in **Pause**.
 
 Steer upward to explore above the meadow. Centre the controls to glide at altitude, then descend to gather blooms near the grass.
 

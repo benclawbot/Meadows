@@ -50,6 +50,7 @@ let mode = touchDevice ? 'touch' : 'mouse';
 let motionReference = null;
 let motionReading = null;
 let motionAngle = 0;
+let recalibratingTilt = false;
 let tiltAttempt = 0;
 let pointerId = null;
 let anchor = null;
@@ -72,6 +73,7 @@ function guidance() {
 
 function renderInputMode() {
   byId('recenter').hidden = mode !== 'tilt';
+  byId('reset-tilt').hidden = mode !== 'tilt';
   byId('change-input').hidden = !touchDevice;
   byId('change-input').textContent = mode === 'tilt' ? 'Switch to touch' : 'Enable tilt';
   byId('pause-help').textContent = guidance();
@@ -87,7 +89,8 @@ function resetInput() {
 
 function useTouch(message = '') {
   tiltAttempt++;
-  motionReference = null;
+  motionReference = motionReading = null;
+  recalibratingTilt = false;
   mode = 'touch';
   resetInput();
   renderInputMode();
@@ -108,9 +111,11 @@ window.addEventListener('deviceorientation', event => {
   if (!motionReference || angle !== motionAngle) {
     motionReference = motionReading;
     motionAngle = angle;
-    if (playing) sayHint(guidance());
+    const reset = recalibratingTilt;
+    recalibratingTilt = false;
+    if (playing) sayHint(reset ? 'Tilt recalibrated.' : guidance());
     else if (paused.open) {
-      inputHelp.textContent = 'Tilt is ready. Resume when you’re comfortable.';
+      inputHelp.textContent = reset ? 'Tilt recalibrated.' : 'Tilt is ready. Resume when you’re comfortable.';
       inputHelp.hidden = false;
     }
   }
@@ -225,12 +230,21 @@ byId('change-input').addEventListener('click', () => {
   if (mode === 'tilt') useTouch('Touch steering is active.');
   else void useTilt();
 });
-byId('recenter').addEventListener('click', () => {
-  motionReference = motionReading;
-  motionAngle = currentAngle();
-  resumeFlight();
-  sayHint('Tilt to steer. You can recenter any time in Pause.');
-});
+function resetTilt() {
+  if (mode !== 'tilt') return;
+  motionReference = motionReading = null;
+  recalibratingTilt = true;
+  flight.steer = flight.rise = 0;
+  const message = 'Hold the phone at your new neutral angle.';
+  if (playing) sayHint(message);
+  else {
+    inputHelp.textContent = message;
+    inputHelp.hidden = false;
+  }
+}
+
+byId('reset-tilt').addEventListener('click', resetTilt);
+byId('recenter').addEventListener('click', resetTilt);
 paused.addEventListener('cancel', event => {
   event.preventDefault();
   resumeFlight();

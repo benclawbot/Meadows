@@ -60,14 +60,14 @@ function makeSky(clock, warmth, haze) {
       }
     `,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(340, 36, 20), material);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(340, 48, 28), material);
   sky.frustumCulled = false;
   sky.renderOrder = -10;
   return sky;
 }
 
-function makeGround() {
-  const surface = new THREE.PlaneGeometry(360, 312, 176, 150);
+function makeGround(mobile) {
+  const surface = new THREE.PlaneGeometry(360, 312, mobile ? 220 : 288, mobile ? 192 : 248);
   surface.rotateX(-Math.PI / 2);
   surface.translate(0, 0, -88);
   const position = surface.attributes.position;
@@ -147,7 +147,7 @@ function grassGeometry() {
     const x = (rng() - 0.5) * 0.36, z = (rng() - 0.5) * 0.29;
     const tip = (rng() - 0.4) * 0.40, height = 0.59 + rng() * 0.41, width = 0.027 + rng() * 0.039;
     const facing = rng() * Math.PI;
-    for (const [y, taper] of [[0, 1], [0.44, 0.74], [0.77, 0.49], [1, 0.025]]) {
+    for (const [y, taper] of [[0, 1], [0.31, 0.83], [0.58, 0.65], [0.81, 0.43], [1, 0.025]]) {
       for (const side of [-1, 1]) {
         positions.push(
           x + Math.cos(facing) * width * taper * side + tip * y * y,
@@ -156,7 +156,7 @@ function grassGeometry() {
         );
       }
     }
-    for (let i = start; i < start + 6; i += 2) indices.push(i, i + 1, i + 2, i + 2, i + 1, i + 3);
+    for (let i = start; i < start + 8; i += 2) indices.push(i, i + 1, i + 2, i + 2, i + 1, i + 3);
   }
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -251,7 +251,7 @@ function makeGrass(clock, warmth, haze, wake, pulse, glades, mobile) {
 function makeRocks() {
   const rng = randomFrom(870);
   const rocks = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(1, 1),
+    new THREE.IcosahedronGeometry(1, 2),
     new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94, flatShading: true }),
     105,
   );
@@ -290,17 +290,17 @@ function makeFlowers(meadow, dot) {
   const count = meadow.flowers.length;
   const group = new THREE.Group();
   const stems = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(0.015, 0.029, 1, 4),
+    new THREE.CylinderGeometry(0.015, 0.029, 1, 8, 2),
     new THREE.MeshStandardMaterial({ color: 0x516438, roughness: 1 }), count,
   );
   const blossoms = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(1, 7, 5),
+    new THREE.SphereGeometry(1, 12, 8),
     new THREE.MeshStandardMaterial({
-      color: 0xffffff, roughness: 0.74, emissive: 0xb8a17f, emissiveIntensity: 0.075,
+      color: 0xffffff, roughness: 0.74, emissive: 0x888888, emissiveIntensity: 0.075,
     }), count * 5,
   );
   const hearts = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(1, 7, 5),
+    new THREE.SphereGeometry(1, 12, 8),
     new THREE.MeshStandardMaterial({ color: 0xd3a85b, roughness: 0.83, emissive: 0xaa7344, emissiveIntensity: 0.31 }),
     count,
   );
@@ -311,9 +311,8 @@ function makeFlowers(meadow, dot) {
   }));
   const bud = new THREE.Color();
   for (let i = 0; i < count; i++) {
-    const flower = meadow.flowers[i];
+    bud.setHex(meadow.flowers[i].color);
     for (let petal = 0; petal < 5; petal++) {
-      bud.setHex(flower.color).multiplyScalar(0.91 + (petal % 3) * 0.077);
       blossoms.setColorAt(i * 5 + petal, bud);
     }
   }
@@ -322,17 +321,52 @@ function makeFlowers(meadow, dot) {
   return { group, stems, blossoms, hearts, glints };
 }
 
+function makePetalTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 192;
+  const ctx = canvas.getContext('2d');
+  // The mesh already forms the silhouette. Shade its whole UV surface.
+  const fill = ctx.createLinearGradient(0, 32, 128, 78);
+  fill.addColorStop(0, '#f0f0f0');
+  fill.addColorStop(0.44, '#ffffff');
+  fill.addColorStop(1, '#f3f3f3');
+  ctx.fillStyle = fill;
+  ctx.fillRect(0, 0, 128, 192);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(0,0,0,.065)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(64, 181);
+  ctx.quadraticCurveTo(63, 98, 64, 12);
+  ctx.stroke();
+  ctx.lineWidth = 0.9;
+  for (let i = 0; i < 7; i++) {
+    const y = 35 + i * 19;
+    const spread = 13 + Math.sin(i * 0.7) * 5;
+    ctx.beginPath();
+    ctx.moveTo(64, y + 14);
+    ctx.quadraticCurveTo(64 - spread * 0.35, y + 4, 64 - spread, y - 4);
+    ctx.moveTo(64, y + 14);
+    ctx.quadraticCurveTo(64 + spread * 0.35, y + 4, 64 + spread, y - 4);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
 function makePetals() {
-  const geometry = new THREE.PlaneGeometry(2, 2, 7, 9);
+  const geometry = new THREE.PlaneGeometry(2, 2, 16, 24);
   const points = geometry.attributes.position;
   for (let i = 0; i < points.count; i++) {
     const y = points.getY(i);
     const x = points.getX(i) * (0.23 + 0.73 * Math.sin((y + 1) * 1.44));
     points.setXYZ(i, x + y * y * 0.16, y, 0.30 * x * x + y * 0.28 + y * y * 0.18);
   }
-  geometry.computeVertexNormals();
-  const material = new THREE.MeshStandardMaterial({
-    color: 0xffffff, emissive: 0x9b6331, emissiveIntensity: 0.43, side: THREE.DoubleSide, roughness: 0.71,
+  const material = new THREE.MeshBasicMaterial({
+    map: makePetalTexture(), side: THREE.DoubleSide, toneMapped: false,
   });
   const mesh = new THREE.InstancedMesh(geometry, material, 68);
   mesh.frustumCulled = false;
@@ -365,7 +399,7 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     color: 0xf9eaca, size: 0.20, map: dot, transparent: true, opacity: 0.51, depthWrite: false, fog: true,
   }));
   wisps.frustumCulled = false;
-  scene.add(makeSky(clock, warmth, haze), makeGround(), makeWater(clock, warmth, haze), grass.mesh,
+  scene.add(makeSky(clock, warmth, haze), makeGround(mobile), makeWater(clock, warmth, haze), grass.mesh,
     makeRocks(), flowers.group, petals, wisps, ambient, sunlight);
 
   const dummy = new THREE.Object3D();
@@ -374,8 +408,6 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
   const look = new THREE.Vector3(-0.8, 1.8, -24);
   const warmFog = new THREE.Color(0xc1b89d);
   let path = new FlightPath();
-  const gold = new THREE.Color(0xffd083);
-  const cream = new THREE.Color(0xfff2d8);
   const petalShape = randomFrom(62023);
   const flutter = Array.from({ length: 68 }, () => ({
     phase: petalShape() * Math.PI * 2,
@@ -383,11 +415,10 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     lean: (petalShape() - 0.5) * 1.10,
     size: 0.72 + petalShape() * 0.49,
     born: -20,
-    tint: gold.clone(),
-    nextTint: gold.clone(),
   }));
   const pose = { x: 0, y: 0, z: 0, heading: 0, pitch: 0 };
-  for (let i = 0; i < 68; i++) petals.setColorAt(i, gold);
+  const tint = new THREE.Color();
+  petals.setColorAt(0, tint.setHex(0xffedd4));
   let lightStage = 0, lastWidth = 0, lastHeight = 0;
 
   function resize() {
@@ -454,6 +485,8 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     petals.count = 1;
 
     const size = Math.min(67, total * 4);
+    const acceleration = clamp((flight.speed - 3.65) / (7.3 - 3.65), 0, 1);
+    const width = 1 - acceleration * 0.48;
     for (let i = 1; i <= size; i++) {
       const petal = flutter[i];
       const individual = time * petal.rate + petal.phase;
@@ -461,26 +494,29 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
       if (!path.sample(spacing, pose)) break;
       // Age shifts the shared wave down the ribbon, while each petal flutters at its own rate.
       const wave = time * 2.05 - spacing * 1.45;
-      const spread = Math.min(0.73, i * 0.037);
-      const side = spread * (Math.sin(wave) * 0.70 + Math.sin(individual) * 0.26 + petal.lean * 0.43);
-      const lift = spread * (Math.cos(wave * 0.91) * 0.37 + Math.cos(individual * 1.12) * 0.24);
+      // Give the ribbon a broader orbit around its leading petal, then draw it
+      // in as the flight gathers speed.
+      const spread = Math.min(0.96, i * 0.049) * width;
+      const spiral = time * 1.15 - spacing * 0.58 + petal.phase;
+      const orbit = (0.16 + spread * 0.66) * width;
+      const side = spread * (Math.sin(wave) * 0.49 + Math.sin(individual) * 0.22 + petal.lean * 0.36)
+        + Math.cos(spiral) * orbit;
+      const lift = spread * (Math.cos(wave * 0.91) * 0.27 + Math.cos(individual * 1.12) * 0.18)
+        + Math.sin(spiral) * orbit * 0.58;
       const rightX = Math.cos(pose.heading), rightZ = Math.sin(pose.heading);
       dummy.position.set(pose.x + rightX * side, pose.y + lift, pose.z + rightZ * side);
       dummy.rotation.set(-0.97 + pose.pitch * 0.53 + Math.sin(individual) * 0.53,
         pose.heading + petal.lean * 0.59 + Math.cos(wave + petal.phase) * 0.36,
-        petal.lean + Math.cos(individual * 0.72) * 0.92 + Math.sin(wave) * 0.29, 'YXZ');
+        petal.lean + Math.cos(individual * 0.72) * 0.70 + Math.sin(wave) * 0.22 + spiral * 0.72, 'YXZ');
       const appear = clamp((time - petal.born) / 0.48, 0, 1);
       const scale = Math.max(0.076, 0.164 - i * 0.0010) * petal.size
         * appear * appear * (3 - 2 * appear);
       dummy.scale.set(scale * 0.83, scale * 1.29, scale);
       dummy.updateMatrix();
       petals.setMatrixAt(i, dummy.matrix);
-      petal.tint.lerp(petal.nextTint, 1 - Math.exp(-dt * 4.1));
-      petals.setColorAt(i, petal.tint);
       petals.count++;
     }
     petals.instanceMatrix.needsUpdate = true;
-    petals.instanceColor.needsUpdate = true;
     wake.value.set(flight.x, active ? 1 : 0, flight.z);
 
     const glade = meadow.glades[next];
@@ -538,15 +574,15 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     },
     bloom(total, flower, time) {
       pulse.value.set(flower.x, flower.z, time);
-      for (let part = 0; part < 4; part++) {
-        const serial = (total - 1) * 4 + part;
-        const petal = flutter[1 + (serial % 67)];
-        petal.nextTint.setHex(flower.color).lerp(cream, part * 0.073);
-        if (serial < 67) {
-          petal.tint.copy(petal.nextTint);
-          petal.born = time + part * 0.037;
-        }
+      const first = 1 + (total - 1) * 4;
+      const end = Math.min(first + 4, flutter.length);
+      if (first >= end) return;
+      tint.setHex(flower.color);
+      for (let i = first; i < end; i++) {
+        flutter[i].born = time + (i - first) * 0.037;
+        petals.setColorAt(i, tint);
       }
+      petals.instanceColor.needsUpdate = true;
     },
     reset() {
       path = new FlightPath();
