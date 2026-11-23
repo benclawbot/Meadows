@@ -1,0 +1,164 @@
+@font-face {
+  font-family: Meadow;
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(data:font/woff2;base64,__DISPLAY_FONT__) format('woff2');
+}
+
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #fff8e4;
+  background: #263d35;
+  --ink: #fff8e4;
+  --paper: #f9e9bb;
+  --green: #25342b;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; overflow: hidden; }
+body { overscroll-behavior: none; }
+main {
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  isolation: isolate;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  min-height: 46px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:focus-visible { outline: 2px solid #fff4be; outline-offset: 4px; }
+button:disabled { opacity: 0.63; cursor: wait; }
+[hidden] { display: none !important; }
+
+#meadow {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+
+#title-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  padding: 4rem max(6vw, calc(env(safe-area-inset-left) + 1rem))
+    max(9vh, calc(env(safe-area-inset-bottom) + 1rem));
+  pointer-events: none;
+  background:
+    linear-gradient(13deg, #101d17ee 0%, #14231dbd 18%, #17261d50 41%, transparent 65%),
+    linear-gradient(90deg, #17271f25, transparent 63%);
+}
+
+.introduction { max-width: min(100%, 44rem); }
+h1, h2 { font-family: Meadow, Georgia, serif; font-weight: 500; }
+h1 {
+  font-size: clamp(4.1rem, 9.3vw, 8.7rem);
+  line-height: 0.82;
+  letter-spacing: -0.061em;
+  margin: 0;
+  text-wrap: balance;
+  text-shadow: 0 1px 21px #16241f50;
+}
+
+.introduction p {
+  font-size: clamp(1rem, 1.35vw, 1.18rem);
+  margin: 1.35rem 0 1.4rem;
+  color: #fff4d9;
+  line-height: 1.55;
+}
+.introduction button { pointer-events: auto; }
+#start-error { max-width: 30rem; margin-bottom: 0; }
+
+.primary {
+  background: var(--paper);
+  color: #28362b;
+  padding-inline: 1.25rem;
+  font-size: 1rem;
+}
+.primary:not(:disabled):hover { background: #fff3cc; }
+.primary:not(:disabled):active { background: #e5d3a1; }
+.quiet {
+  background: #24332be8;
+  color: var(--ink);
+  border-color: #e3d5a957;
+  font-size: 0.9375rem;
+}
+.quiet:hover { background: #34483a; border-color: #f0e0b691; }
+.quiet:active { background: #192820; }
+
+.flight-controls {
+  position: absolute;
+  top: max(1rem, calc(env(safe-area-inset-top) + 0.5rem));
+  right: max(1rem, calc(env(safe-area-inset-right) + 0.5rem));
+  display: flex;
+  gap: 0.5rem;
+}
+.flight-messages {
+  position: absolute;
+  inset: auto max(1rem, env(safe-area-inset-right))
+    max(1.1rem, calc(env(safe-area-inset-bottom) + 0.45rem))
+    max(1rem, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 0.45rem;
+  pointer-events: none;
+  text-align: center;
+}
+.hint, .milestone {
+  color: var(--ink);
+  background: #26372de8;
+  border-radius: 8px;
+  padding: 0.62rem 0.9rem;
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+.milestone { background: #26372df5; }
+
+dialog {
+  color: var(--ink);
+  background: #25362d;
+  border: 1px solid #d9cc9c68;
+  border-radius: 12px;
+  width: min(30rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 1.5rem);
+  padding: clamp(1.25rem, 5vw, 2.35rem);
+}
+dialog::backdrop { background: #14231ebc; }
+dialog h2 { margin: 0; font-size: clamp(2.2rem, 7vw, 3.15rem); line-height: 0.91; letter-spacing: -0.045em; }
+dialog p { font-size: 1rem; line-height: 1.5; margin: 1rem 0 1.3rem; }
+.pause-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; }
+#input-help { margin-bottom: 0; }
+noscript { position: absolute; left: 1rem; top: 1rem; }
+
+@media (max-width: 550px) {
+  #title-screen {
+    padding-left: max(1.45rem, calc(env(safe-area-inset-left) + 0.8rem));
+    padding-right: max(1.45rem, calc(env(safe-area-inset-right) + 0.8rem));
+    padding-bottom: max(3.8rem, calc(env(safe-area-inset-bottom) + 2.3rem));
+    background: linear-gradient(11deg, #101d17f5 4%, #182b20b0 27%, transparent 62%);
+  }
+  h1 { font-size: clamp(3.8rem, 13.5vw, 6rem); }
+  .introduction p { max-width: 23ch; margin-block: 1rem; }
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  #title-screen { padding-bottom: max(1rem, calc(env(safe-area-inset-bottom) + 0.4rem)); }
+  h1 { font-size: clamp(3.4rem, 13vh, 5.5rem); }
+  .introduction p { margin-block: 0.55rem 0.75rem; }
+}
