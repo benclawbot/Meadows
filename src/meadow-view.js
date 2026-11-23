@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { channel, clamp, FlightPath, flightSurface, randomFrom, smooth, terrain, waterHeight } from './flight.js';
-import { nextRing } from './journey.js';
+import { currentLeg } from './journey.js';
 
 const fogColor = new THREE.Color(0xa4b2ab);
 const sun = new THREE.Vector3(0.38, 0.20, -0.90).normalize();
+const moon = new THREE.Vector3(-0.32, 0.31, -0.88).normalize();
 const vertex = `
   varying vec3 world;
   void main() {
@@ -27,32 +28,42 @@ const noise = `
   }
 `;
 
-function makeSky(clock, warmth, haze, skyTint) {
+function makeSky(clock, warmth, haze, skyTint, light, night) {
   const material = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    uniforms: { clock, warmth, haze, skyTint, light: { value: sun } },
+    uniforms: { clock, warmth, haze, skyTint, light, night },
     vertexShader: vertex,
     fragmentShader: `
       varying vec3 world;
       uniform vec3 light, haze, skyTint;
-      uniform float clock, warmth;
+      uniform float clock, warmth, night;
       ${noise}
       void main() {
         vec3 dir = normalize(world - cameraPosition);
         float elevation = max(dir.y, 0.);
         float towardSun = max(0., dot(dir, light));
         vec3 zenith = mix(skyTint, skyTint * 1.20, warmth);
-        vec3 horizon = mix(haze * 1.18, vec3(.73,.75,.58), warmth*.62);
+        vec3 horizon = mix(haze * 1.18, vec3(.73,.75,.58), warmth*.62*(1.-night));
         vec3 color = mix(horizon, zenith, smoothstep(-.045, .63, dir.y));
-        color += vec3(.71,.40,.16) * pow(towardSun, 10.) * (.38 + warmth*.27);
-        color += vec3(1.,.75,.39) * pow(towardSun, 72.) * .45;
-        color += vec3(2.55,1.78,.88) * smoothstep(.99954,.99973,towardSun);
+        color += mix(vec3(.71,.40,.16), vec3(.011,.022,.047), night)
+          * pow(towardSun, 10.) * (.38 + warmth*.27);
+        color += mix(vec3(1.,.75,.39), vec3(.10,.16,.28), night) * pow(towardSun, 72.) * .45;
+        color += mix(vec3(2.55,1.78,.88), vec3(1.30,1.63,2.10), night)
+          * smoothstep(.99954,.99973,towardSun);
+        if (night > .5) {
+          vec2 starUV = vec2(atan(dir.z, dir.x), dir.y) * 144.;
+          vec2 cell = floor(starUV);
+          vec2 center = vec2(hash(cell + 17.13), hash(cell + 38.07)) * .50 + .25;
+          float star = (1.-smoothstep(.025,.16,length(fract(starUV)-center))) * step(.974,hash(cell));
+          color += vec3(.51,.66,.98) * star * smoothstep(.12,.43,elevation);
+        }
         vec2 cloudUV = dir.xz / (elevation + .18);
         cloudUV *= vec2(1.35, 2.25);
         cloudUV += vec2(clock * .0035, clock * .001);
         float cloud = smoothstep(.48, .76, fbm(cloudUV));
         cloud *= smoothstep(.015,.12,elevation) * (1.-smoothstep(.7,.95,elevation));
-        color = mix(color, mix(vec3(.57,.66,.66),vec3(.93,.79,.52),pow(towardSun,4.)), cloud * .52);
+        vec3 cloudColor = mix(vec3(.57,.66,.66),vec3(.93,.79,.52),pow(towardSun,4.));
+        color = mix(color, mix(cloudColor,vec3(.022,.039,.076),night), cloud * .52);
         color = mix(haze, color, smoothstep(-.15,.08,dir.y));
         float grain = hash(gl_FragCoord.xy) - .5;
         gl_FragColor = vec4(color + grain*.004,1.);
@@ -103,15 +114,15 @@ function makeGround(mobile) {
   return new THREE.Mesh(surface, material);
 }
 
-function makeWater(clock, warmth, haze) {
+function makeWater(clock, warmth, haze, light, night) {
   const plane = new THREE.PlaneGeometry(890, 850);
   plane.rotateX(-Math.PI / 2);
   plane.translate(0, waterHeight, -85);
   return new THREE.Mesh(plane, new THREE.ShaderMaterial({
-    uniforms: { clock, warmth, haze, light: { value: sun } },
+    uniforms: { clock, warmth, haze, light, night },
     vertexShader: vertex,
     fragmentShader: `
-      uniform float clock, warmth;
+      uniform float clock, warmth, night;
       uniform vec3 light, haze;
       varying vec3 world;
       ${noise}
@@ -126,10 +137,12 @@ function makeWater(clock, warmth, haze) {
         vec3 deep = vec3(.045,.18,.18);
         vec3 reflected = mix(vec3(.20,.35,.35),vec3(.40,.48,.39),warmth);
         vec3 color = mix(deep, reflected, .28+.70*f);
+        color = mix(color, mix(vec3(.007,.015,.031),vec3(.039,.066,.115),f), night);
         float gloss = pow(max(dot(reflect(-light,n),eye),0.),110.);
         float glimmer = max(0., sin(a*1.42+sin(b*1.34)*1.8));
-        color += (vec3(1.2,.86,.40)*gloss * (0.38 + .62 * glimmer));
-        color += vec3(.031,.049,.049) * pow(glimmer,5.) * (.25+.75*noise(p*.43));
+        color += mix(vec3(1.2,.86,.40),vec3(.48,.71,1.1),night) * gloss * (0.38 + .62 * glimmer);
+        color += mix(vec3(.031,.049,.049),vec3(.004,.009,.02),night)
+          * pow(glimmer,5.) * (.25+.75*noise(p*.43));
         float distanceToEye = length(cameraPosition-world);
         color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*.000090));
         gl_FragColor = vec4(color,1.);
@@ -164,7 +177,7 @@ function grassGeometry() {
   return geometry;
 }
 
-function makeGrass(clock, warmth, haze, wake, pulse, glades, mobile) {
+function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile) {
   const rng = randomFrom(32160);
   const geometry = grassGeometry();
   const tuft = [];
@@ -192,7 +205,7 @@ function makeGrass(clock, warmth, haze, wake, pulse, glades, mobile) {
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: {
-      clock, warmth, haze, wake, pulse, glow,
+      clock, warmth, haze, night, wake, pulse, glow,
       patches: { value: glades.map(glade => new THREE.Vector2(glade.x, glade.z)) },
     },
     vertexShader: `
@@ -217,7 +230,7 @@ function makeGrass(clock, warmth, haze, wake, pulse, glades, mobile) {
       }
     `,
     fragmentShader: `
-      uniform float clock, warmth, glow[3];
+      uniform float clock, warmth, night, glow[3];
       uniform vec3 haze, pulse;
       uniform vec2 patches[3];
       varying vec3 world;
@@ -235,7 +248,10 @@ function makeGrass(clock, warmth, haze, wake, pulse, glades, mobile) {
         color += vec3(.10,.057,.009)*warmth*plant.x;
         float age = max(0.,clock-pulse.z);
         float ring = length(world.xz-pulse.xy)-age*6.0;
-        color += vec3(.18,.11,.025) * exp(-ring*ring*2.0-age*1.8) * plant.x;
+        float ripple = exp(-ring*ring*2.0-age*1.8) * plant.x;
+        vec3 nightColor = color * vec3(.08,.16,.31) + vec3(.005,.018,.057) * restoration;
+        color = mix(color, nightColor, night);
+        color += mix(vec3(.18,.11,.025), vec3(.023,.12,.36),night) * ripple;
         float distanceToEye = distance(world,cameraPosition);
         color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*.000090));
         gl_FragColor = vec4(color,1.);
@@ -386,12 +402,13 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
   const camera = new THREE.PerspectiveCamera(53, 1, 0.065, 355);
   const clock = { value: 0 }, warmth = { value: 0 }, haze = { value: fogColor.clone() };
   const skyTint = { value: new THREE.Color() };
+  const night = { value: 0 };
+  const light = { value: sun.clone() };
   const wake = { value: new THREE.Vector3() };
   const pulse = { value: new THREE.Vector3(0, 0, -20) };
-  const grass = makeGrass(clock, warmth, haze, wake, pulse, journey.meadow.glades, mobile);
+  const grass = makeGrass(clock, warmth, haze, night, wake, pulse, journey.meadow.glades, mobile);
   const ambient = new THREE.HemisphereLight(0xe5f1ff, 0x6a6740, 1.75);
   const sunlight = new THREE.DirectionalLight(0xffe4ab, 2.15);
-  sunlight.position.copy(sun).multiplyScalar(56);
   const dot = softDot();
   const flowers = makeFlowers(journey.meadow.flowers.length, dot);
   const petals = makePetals();
@@ -399,7 +416,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     map: dot, color: 0xffecbf, opacity: 0.95, depthWrite: false, toneMapped: false,
   }));
   const ringGeometry = new THREE.TorusGeometry(1, 0.025, 8, 72);
-  const rings = Array.from({ length: 5 }, () => new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
+  const rings = Array.from({ length: 2 }, () => new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
     transparent: true, depthWrite: false, toneMapped: false,
   })));
   const winds = new THREE.BufferGeometry();
@@ -409,7 +426,8 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     color: 0xf9eaca, size: 0.20, map: dot, transparent: true, opacity: 0.51, depthWrite: false, fog: true,
   }));
   wisps.frustumCulled = false;
-  scene.add(makeSky(clock, warmth, haze, skyTint), makeGround(mobile), makeWater(clock, warmth, haze), grass.mesh,
+  scene.add(makeSky(clock, warmth, haze, skyTint, light, night), makeGround(mobile),
+    makeWater(clock, warmth, haze, light, night), grass.mesh,
     makeRocks(), flowers.group, petals, wisps, marker, ...rings, ambient, sunlight);
 
   const dummy = new THREE.Object3D();
@@ -429,7 +447,6 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
   }));
   const pose = { x: 0, y: 0, z: 0, heading: 0, pitch: 0 };
   const tint = new THREE.Color();
-  petals.setColorAt(0, tint.setHex(0xffedd4));
   let lightStage = 0, lastWidth = 0, lastHeight = 0, reposition = true;
 
   function resize() {
@@ -446,7 +463,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
   }
 
   function drawFlowers(time, destination) {
-    const { meadow } = journey;
+    const { meadow, level } = journey;
     const highlights = flowers.glints.geometry.attributes.position;
     const { blossoms, hearts, stems } = flowers;
     for (let i = 0; i < meadow.flowers.length; i++) {
@@ -477,8 +494,9 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
         dummy.updateMatrix();
         blossoms.setMatrixAt(i * 5 + p, dummy.matrix);
       }
-      const visible = flower.glade === destination?.glade && !flower.bloomed;
-      highlights.setXYZ(i, sx, visible ? height + 0.27 + 0.08 * Math.sin(time * 1.8 + i) : -20, flower.z);
+      const guide = flower.glade === destination?.glade && !flower.bloomed;
+      const glintY = level.night ? height + 0.06 : height + 0.27 + 0.08 * Math.sin(time * 1.8 + i);
+      highlights.setXYZ(i, sx, level.night || guide ? glintY : -20, flower.z);
     }
     for (const mesh of [blossoms, hearts, stems]) mesh.instanceMatrix.needsUpdate = true;
     highlights.needsUpdate = true;
@@ -577,17 +595,31 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     const { level, meadow } = journey;
     levelFog.setHex(level.haze);
     skyTint.value.setHex(level.sky);
+    night.value = level.night ? 1 : 0;
+    light.value.copy(level.night ? moon : sun);
+    sunlight.position.copy(light.value).multiplyScalar(56);
     sunlight.color.setHex(level.light);
+    ambient.color.setHex(level.night ? 0xa6caff : 0xe5f1ff);
+    ambient.groundColor.setHex(level.night ? 0x2a384b : 0x6a6740);
+    ambient.intensity = level.night ? 0.78 : 1.75;
+    flowers.blossoms.material.emissive.setHex(level.night ? 0x275eff : 0x888888);
+    flowers.blossoms.material.emissiveIntensity = level.night ? 0.58 : 0.075;
+    flowers.hearts.material.color.setHex(level.night ? 0x8ad9ff : 0xd3a85b);
+    flowers.hearts.material.emissive.setHex(level.night ? 0x409bff : 0xaa7344);
+    flowers.hearts.material.emissiveIntensity = level.night ? 0.72 : 0.31;
+    flowers.glints.material.color.setHex(level.night ? 0x438aff : 0xffecbf);
+    flowers.glints.material.size = level.night ? 1.18 : 0.86;
+    flowers.glints.material.blending = level.night ? THREE.AdditiveBlending : THREE.NormalBlending;
+    flowers.glints.material.toneMapped = !level.night;
+    flowers.glints.material.needsUpdate = true;
+    wisps.material.color.setHex(level.night ? 0x9bd7ff : 0xf9eaca);
+    petals.setColorAt(0, tint.setHex(level.night ? 0x9edcff : 0xffedd4));
+    petals.instanceColor.needsUpdate = true;
     flowers.recolor(meadow.flowers);
     const patches = grass.mesh.material.uniforms.patches.value;
     meadow.glades.forEach((glade, i) => patches[i].set(glade.x, glade.z));
-    rings.forEach((mesh, i) => {
-      const ring = journey.rings[i];
+    rings.forEach(mesh => {
       mesh.visible = false;
-      if (!ring) return;
-      mesh.position.set(ring.x, ring.y, ring.z);
-      mesh.scale.setScalar(ring.radius);
-      mesh.rotation.y = ring.heading;
       mesh.material.color.setHex(level.ringColor);
     });
   }
@@ -600,9 +632,9 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       const { meadow } = journey;
       lightStage = smooth(lightStage, progress, dt, 0.32);
       warmth.value = lightStage;
-      haze.value.copy(levelFog).lerp(warmFog, lightStage * 0.36);
+      haze.value.copy(levelFog).lerp(warmFog, lightStage * 0.36 * (1 - night.value));
       scene.fog.color.copy(haze.value);
-      sunlight.intensity = 2.05 + lightStage * 0.42;
+      sunlight.intensity = night.value ? 0.68 : 2.05 + lightStage * 0.42;
       for (let i = 0; i < meadow.glades.length; i++) {
         const glade = meadow.glades[i];
         glade.glow = smooth(glade.glow, glade.lit ? 1 : 0, dt, 0.76);
@@ -614,10 +646,15 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
         marker.scale.setScalar(1.3 + (reduced ? 0 : Math.sin(time * 2.1) * 0.14));
         marker.material.color.setHex(destination.color);
       }
-      const ring = active && nextRing(journey);
+      const leg = currentLeg(journey);
       rings.forEach((mesh, i) => {
-        mesh.visible = Boolean(ring && i >= journey.passed && i <= journey.passed + 1 && journey.rings[i]);
-        if (mesh.visible) mesh.material.opacity = i === journey.passed ? 0.86 : 0.24;
+        const ring = active && leg?.rings[leg.passed + i];
+        mesh.visible = Boolean(ring);
+        if (!ring) return;
+        mesh.position.set(ring.x, ring.y, ring.z);
+        mesh.scale.setScalar(ring.radius);
+        mesh.rotation.y = ring.heading;
+        mesh.material.opacity = i === 0 ? 0.86 : 0.24;
       });
       drawFlowers(time, destination);
       drawFlight(flight, time, dt, total, destination, active);
@@ -625,12 +662,11 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     },
     bloom(total, flower, time) {
       pulse.value.set(flower.x, flower.z, time);
-      const first = 1 + (total - 1) * 4;
-      const end = Math.min(first + 4, flutter.length);
-      if (first >= end) return;
+      const first = (total - 1) * 4;
       tint.setHex(flower.color);
-      for (let i = first; i < end; i++) {
-        flutter[i].born = time + (i - first) * 0.037;
+      for (let part = 0; part < 4; part++) {
+        const i = 1 + (first + part) % (flutter.length - 1);
+        flutter[i].born = time + part * 0.037;
         petals.setColorAt(i, tint);
       }
       petals.instanceColor.needsUpdate = true;

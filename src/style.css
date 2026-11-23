@@ -148,7 +148,7 @@ h1 {
 }
 .objective h2 { margin: 0; font-size: 1.45rem; line-height: 1; }
 .objective p { margin: 0.24rem 0 0; font-size: 0.9rem; line-height: 1.34; }
-#level-progress { color: #f1db9f; }
+#level-progress, #height-guide { color: #f1db9f; }
 .bearing {
   flex: 0 0 1.8rem;
   aspect-ratio: 1;

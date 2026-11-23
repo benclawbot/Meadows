@@ -19,14 +19,15 @@ As you make progress through a flight, more instruments join the chamber score a
 
 ### Flights
 
-1. **First Light** — Wake seven flowers in the shallows.
-2. **Reedbank Waltz** — Open four flowers in each of three reed beds.
-3. **Tideglass** — Follow five low wind rings along the tidal channel.
-4. **A Basket of Color** — Gather two gold, two lavender, and two blue blooms.
-5. **The Long Exhale** — Climb through three rings, then descend through two.
-6. **Last Light** — Wake three flowers in each glade, then follow three rings toward the sea.
+1. **First Light** — Wake flowers in the shallows and tidal flats, then follow a long loop back to the coast.
+2. **Reedbank Waltz** — Bring three reed beds into song and sweep around ridges between them.
+3. **Tideglass** — Follow the channel downstream, bloom the salt bank, and circle back upstream.
+4. **A Basket of Color** — Gather specific colors in three glades linked by wide turns.
+5. **The Long Exhale** — Climb into the high wind, descend into a sheltered glade, and ride a second rise.
+6. **Last Light** — Carry evening light across three glades before flying out along the headland.
+7. **Blue After Dark** — Wake glowing blue flowers in three night glades and follow moonlit wind rings.
 
-Finishing a flight opens the next. Keep drifting when you reach a goal or open the Flight map to replay any unlocked route. Progress is saved in your browser.
+Each flight has four to six stages with no time limits. Finishing a flight opens the next. Keep drifting after the final stage or open the Flight map to replay any unlocked route. Progress is saved in your browser.
 
 ### Play
 

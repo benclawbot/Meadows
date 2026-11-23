@@ -1,5 +1,5 @@
 import { collectBlooms, curve, flightSurface, nearbyBloomTurn, smooth, stepFlight, tiltControl } from './flight.js';
-import { beginLevel, bloomObjective, crossRing, journeyProgress, journeyTarget, levels } from './journey.js';
+import { advanceLeg, beginLevel, bloomObjective, canBloom, crossRing, currentLeg, journeyProgress, journeyTarget, levels } from './journey.js';
 import { createMeadowView } from './meadow-view.js';
 import { MeadowScore } from './score.js';
 import piano45 from '../samples/piano45.mp3';
@@ -28,6 +28,7 @@ const hint = byId('hint');
 const mapDialog = byId('flight-map');
 const levelList = byId('level-list');
 const levelProgress = byId('level-progress');
+const heightGuide = byId('height-guide');
 const bearing = byId('bearing');
 const levelClear = byId('level-clear');
 const nextLevel = byId('next-level');
@@ -181,9 +182,16 @@ function sampleControl() {
 }
 
 function showProgress() {
-  const counts = journey.groups.map(group => `${group.label} ${group.progress}/${group.count}`);
-  if (journey.rings.length) counts.push(`Wind rings ${journey.passed}/${journey.rings.length}`);
-  levelProgress.textContent = progress === 1 ? 'Flight complete' : counts.join(' · ');
+  const leg = currentLeg(journey);
+  byId('level-goal').textContent = leg?.goal ?? 'Keep drifting or open the next flight.';
+  if (!leg) {
+    levelProgress.textContent = 'Flight complete';
+    return;
+  }
+  const counts = leg.groups.map(group => `${group.label} ${group.progress}/${group.count}`);
+  if (leg.rings.length) counts.push(`Rings ${leg.passed}/${leg.rings.length}`);
+  const stretch = `${journey.legIndex + 1}/${journey.legs.length} · ${leg.title}`;
+  levelProgress.textContent = [stretch, ...counts].join(' · ');
 }
 
 function resetMeadow(index) {
@@ -196,7 +204,6 @@ function resetMeadow(index) {
   view.reset(journey);
   hint.hidden = levelClear.hidden = true;
   byId('level-name').textContent = journey.level.title;
-  byId('level-goal').textContent = journey.level.goal;
   showProgress();
 }
 
@@ -388,7 +395,7 @@ function step(dt) {
     control.x = nearbyBloomTurn(meadow, flight, destination);
   }
   stepFlight(flight, control, dt);
-  for (const { flower, completed: lit } of collectBlooms(meadow, flight, x, z)) {
+  for (const { flower, completed: lit } of collectBlooms(meadow, flight, x, z, flower => canBloom(journey, flower))) {
     bloomObjective(journey, flower);
     view.bloom(++total, flower, time);
     music.bloom(flower, (flower.x - flight.x) * 0.22, lit);
@@ -397,14 +404,15 @@ function step(dt) {
     x: flight.x, y: flightSurface(flight.x, flight.z) + flight.height, z: flight.z,
   });
   if (ring) {
-    const chime = { ...ring, color: journey.level.ringColor, tone: journey.passed, glade: 0, voice: 'flute' };
+    const chime = { ...ring, color: journey.level.ringColor, tone: currentLeg(journey).passed, glade: 0, voice: 'flute' };
     view.bloom(++total, chime, time);
     music.bloom(chime, 0, false);
   }
   const updated = journeyProgress(journey);
   if (updated !== progress) {
     progress = updated;
-    music.stage = Math.floor(progress * 3);
+    advanceLeg(journey);
+    music.stage = Math.min(3, Math.floor(progress * 4));
     showProgress();
     if (progress === 1) finishFlight();
   }
@@ -427,6 +435,10 @@ function frame(now) {
     const heading = Math.atan2(destination.x - flight.x, flight.z - destination.z) - flight.heading;
     bearing.style.transform = `rotate(${heading}rad)`;
   }
+  const delta = destination?.y === undefined ? 0 : destination.y - flightSurface(flight.x, flight.z) - flight.height;
+  const direction = delta > 3.5 ? 'Climb toward the ring' : delta < -3.5 ? 'Descend toward the ring' : '';
+  if (heightGuide.textContent !== direction) heightGuide.textContent = direction;
+  heightGuide.hidden = !direction;
   view.draw(flight, time, dt, total, destination, progress, started);
   requestAnimationFrame(frame);
 }

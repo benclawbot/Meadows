@@ -52,10 +52,13 @@ const patches = [
   { x: 3, z: -83, name: 'The tidal flats', palette: [lavender, gold, blue, rose, cream], start: [-14, -64], end: [12, -102] },
 ];
 
-export function makeMeadow(routes) {
+export function makeMeadow(routes, night = false) {
   const rng = randomFrom(8129);
   const flowers = [];
   const glades = patches.map((patch, id) => {
+    const palette = night
+      ? [0x567bff, 0x77adff, 0x4e95fe, 0x68c5ff].map(color => ({ ...blue, color }))
+      : patch.palette;
     const [name, [sx, sz], [ex, ez], bend] = routes?.[id]
       ?? [patch.name, patch.start, patch.end, id === 1 ? -8 : 3.4];
     for (let i = 0; i < 12; i++) {
@@ -63,14 +66,14 @@ export function makeMeadow(routes) {
       const x = sx + (ex - sx) * t + Math.sin(t * Math.PI * 2) * bend;
       const z = sz + (ez - sz) * t;
       const offset = i === 0 ? 0 : (rng() - 0.5) * 1.7;
-      const kind = patch.palette[i % patch.palette.length];
+      const kind = palette[i % palette.length];
       flowers.push({ x: x + offset, z, glade: id, tone: i, growth: 0, bloomed: false, ...kind });
       if (i > 1) {
         const side = i % 2 === 0 ? -1 : 1;
         flowers.push({
           x: x + side * (2.2 + rng() * 3), z: z + (rng() - 0.5) * 2.1,
           glade: id, tone: i + 1, growth: 0, bloomed: false,
-          ...patch.palette[(i + 2) % patch.palette.length],
+          ...palette[(i + 2) % palette.length],
         });
       }
     }
@@ -185,14 +188,14 @@ export class FlightPath {
   }
 }
 
-export function collectBlooms(meadow, flight, previousX, previousZ) {
+export function collectBlooms(meadow, flight, previousX, previousZ, eligible = () => true) {
   if (flight.height > 2.85) return [];
   const dx = flight.x - previousX;
   const dz = flight.z - previousZ;
   const lengthSquared = dx * dx + dz * dz;
   const hits = [];
   for (const flower of meadow.flowers) {
-    if (flower.bloomed) continue;
+    if (flower.bloomed || !eligible(flower)) continue;
     const offsetX = flower.x - previousX;
     const offsetZ = flower.z - previousZ;
     const along = lengthSquared
