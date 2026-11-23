@@ -1,4 +1,5 @@
 import { clamp, randomFrom } from './flight.js';
+import { levelMusic } from './level-music.js';
 
 export const BEAT = 60 / 65;
 export const BAR = 4 * BEAT;
@@ -26,8 +27,8 @@ const instruments = {
   harp: [['harp59', 59], ['harp69', 69], ['harp79', 79]],
 };
 
-export function bloomPitch(barIndex, tone, previous) {
-  const notes = score[barIndex % score.length][1].map(note => note < 65 ? note + 12 : note).sort((a, b) => a - b);
+export function bloomPitch(barIndex, tone, previous, phrases = score) {
+  const notes = phrases[barIndex % phrases.length][1].map(note => note < 65 ? note + 12 : note).sort((a, b) => a - b);
   const start = tone % notes.length;
   for (let step = 0; step < notes.length; step++) {
     const note = notes[(start + step) % notes.length];
@@ -50,7 +51,30 @@ export class MeadowScore {
     this.lastNote = null;
     this.lastOnset = 0;
     this.lastGust = -1;
-    this.voices = new Set();
+    this.voices = new Map();
+    this.setLevel(0);
+  }
+
+  setLevel(index) {
+    this.theme = levelMusic[index];
+    this.beat = this.theme ? 60 / this.theme.tempo : BEAT;
+    this.bar = this.theme ? this.theme.beats * this.beat : BAR;
+    this.phrases = this.theme?.phrases ?? score;
+    this.stage = this.barNumber = this.nextBar = this.startedAt = this.lastOnset = 0;
+    this.lastNote = null;
+    this.lastGust = -1;
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    for (const [voice, envelope] of this.voices) {
+      if (envelope.cancelAndHoldAtTime) envelope.cancelAndHoldAtTime(now);
+      else {
+        const volume = envelope.value;
+        envelope.cancelScheduledValues(now);
+        envelope.setValueAtTime(volume, now);
+      }
+      envelope.linearRampToValueAtTime(0, now + 0.09);
+      voice.stop(now + 0.10);
+    }
   }
 
   async start() {
@@ -161,7 +185,7 @@ export class MeadowScore {
     }
     output.connect(this.master);
     output.connect(this.room);
-    this.voices.add(source);
+    this.voices.set(source, env.gain);
     source.onended = () => {
       this.voices.delete(source);
       source.disconnect();
@@ -173,6 +197,23 @@ export class MeadowScore {
   }
 
   playBar(index, time) {
+    if (this.theme) {
+      const { backing, bass, lead, accent, figure, melody, length } = this.theme;
+      const [root, chord, motif] = this.phrases[index];
+      const beat = this.beat;
+      this.note(bass, root, time, this.bar * 0.72, 0.094, -0.22);
+      for (const [offset, tone] of figure) {
+        this.note(backing, chord[tone], time + beat * offset, 1.38, 0.081, -0.13 + tone * 0.076);
+      }
+      motif.forEach((pitch, i) => {
+        const duration = Math.min(length, (this.theme.beats - melody[i]) * beat);
+        this.note(lead, pitch, time + beat * melody[i], duration, i === 0 ? 0.112 : 0.086, 0.17);
+      });
+      if (this.stage >= 1) this.note(accent, chord[2] + (accent === 'cello' ? -12 : 12), time + beat * 0.61, 1.55, 0.073, -0.24);
+      if (this.stage >= 2) this.note(bass, chord[1], time + this.bar * 0.48, 1.7, 0.062, -0.08);
+      if (this.stage >= 3) this.note(lead, chord[3], time + this.bar * 0.82, 0.8, 0.058, 0.31);
+      return;
+    }
     const [bass, voicing, cello, flute] = score[index];
     this.note('piano', bass, time, 3.0, 0.112, -0.19);
     this.note('piano', voicing[1], time + BEAT * 0.58, 2.2, 0.108, -0.1);
@@ -199,18 +240,18 @@ export class MeadowScore {
     if (!ctx || ctx.state !== 'running' || !this.nextBar) return;
     const now = ctx.currentTime;
     if (Math.abs(gust - this.lastGust) > 0.045) {
-      this.airGain.gain.setTargetAtTime(0.16 + gust * 0.21, now, 0.43);
+      this.airGain.gain.setTargetAtTime((this.theme?.air ?? 0.16) + gust * 0.17, now, 0.43);
       this.lastGust = gust;
     }
-    if (this.nextBar < now - BAR) {
-      const missed = Math.ceil((now - this.nextBar) / BAR);
+    if (this.nextBar < now - this.bar) {
+      const missed = Math.ceil((now - this.nextBar) / this.bar);
       this.barNumber += missed;
-      this.nextBar += missed * BAR;
+      this.nextBar += missed * this.bar;
     }
     if (this.nextBar < now + 0.23) {
-      this.playBar(this.barNumber % score.length, Math.max(now + 0.019, this.nextBar));
+      this.playBar(this.barNumber % this.phrases.length, Math.max(now + 0.019, this.nextBar));
       this.barNumber++;
-      this.nextBar += BAR;
+      this.nextBar += this.bar;
     }
   }
 
@@ -218,15 +259,15 @@ export class MeadowScore {
     const ctx = this.context;
     if (!ctx || !this.nextBar || ctx.state !== 'running') return;
     const at = Math.min(ctx.currentTime + 0.13, Math.max(ctx.currentTime + 0.008, this.lastOnset + 0.054));
-    const bar = Math.max(0, Math.floor((at - this.startedAt) / BAR));
-    const pitch = bloomPitch(bar, flower.tone + flower.glade, this.lastNote);
+    const bar = Math.max(0, Math.floor((at - this.startedAt) / this.bar));
+    const pitch = bloomPitch(bar, flower.tone + flower.glade, this.lastNote, this.phrases);
     this.lastNote = pitch;
     this.lastOnset = at;
-    const instrument = flower.voice === 'flute' ? 'harp' : flower.voice;
+    const instrument = this.theme?.backing ?? (flower.voice === 'flute' ? 'harp' : flower.voice);
     this.note(instrument, pitch, at, 1.47, instrument === 'piano' ? 0.141 : 0.20, pan);
-    if (flower.voice === 'flute') this.note('flute', pitch + 12, at + 0.08, 0.64, 0.055, pan);
+    if (flower.voice === 'flute') this.note(this.theme?.accent ?? 'flute', pitch + 12, at + 0.08, 0.64, 0.055, pan);
     if (completed) {
-      const tones = score[bar % score.length][1];
+      const tones = this.phrases[bar % this.phrases.length][1];
       this.note('harp', tones[0], at + 0.16, 2.1, 0.15, -0.12);
       this.note('harp', tones[2] + 12, at + 0.47, 2.1, 0.13, 0.12);
     }

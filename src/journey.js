@@ -1,4 +1,5 @@
-import { clamp, flightSurface, makeMeadow, newFlight } from './flight.js';
+import { clamp, makeMeadow, newFlight } from './flight.js';
+import { flightSurface, landscapes } from './landscape.js';
 
 const bed = (label, glade, count, kind) => ({ label, glade, count, kind });
 const blooms = (title, goal, ...groups) => ({ title, goal, groups });
@@ -7,6 +8,7 @@ const wind = (title, goal, ...rings) => ({ title, goal, rings });
 export const levels = [
   {
     title: 'First Light',
+    landscape: landscapes.meadow,
     goal: 'Wake the shallows, cross the western meadow, and bring color back to the coast.',
     finish: 'Morning has reached both sides of the meadow.',
     haze: 0xa4b2ab, sky: 0x6396a1, light: 0xffe4ab, ringColor: 0xffebba,
@@ -21,10 +23,11 @@ export const levels = [
   },
   {
     title: 'Reedbank Waltz',
+    landscape: landscapes.marsh,
     goal: 'Bring three reed beds into song, with sweeping turns between them.',
     finish: 'The reed beds are singing together.',
     start: [-13, -12, 1.4, -0.18],
-    haze: 0xadb39b, sky: 0x86a78b, light: 0xffe5bb, ringColor: 0xf1d799,
+    haze: 0xa8b3a7, sky: 0x829a98, light: 0xffe5bb, ringColor: 0xf1d799,
     routes: [
       ['Low reeds', [-15, -19], [-31, -46], 4],
       ['Long reeds', [-24, -56], [-30, -81], -5],
@@ -42,6 +45,7 @@ export const levels = [
   },
   {
     title: 'Tideglass',
+    landscape: landscapes.coast,
     goal: 'Follow the tidal channel downstream, wake the salt-bank flowers, and circle back upstream.',
     finish: 'The tide has carried you home.',
     start: [17, -15, 2.5, -0.22],
@@ -62,10 +66,11 @@ export const levels = [
   },
   {
     title: 'A Basket of Color',
+    landscape: landscapes.heath,
     goal: 'Find gold, lavender, and blue in different corners of the meadow.',
     finish: 'Gold, lavender, and blue share the ribbon.',
     start: [-8, -21, 1.45, -0.22],
-    haze: 0xc5b5bc, sky: 0x8d92ba, light: 0xffe4e2, ringColor: 0xf7d9ed,
+    haze: 0x9d939d, sky: 0x65647a, light: 0xf0e8ff, ringColor: 0xf7d9ed,
     routes: [
       ['Gold rise', [-10, -30], [-31, -55], -3],
       ['Blue hollow', [10, -76], [25, -106], 2],
@@ -84,31 +89,33 @@ export const levels = [
   },
   {
     title: 'The Long Exhale',
+    landscape: landscapes.alpine,
     goal: 'Climb to the high wind, descend into shelter, then ride a second rise.',
-    finish: 'The high wind has carried you back to the meadow.',
+    finish: 'The high wind has carried you back to the foothills.',
     start: [-21, -20, 3.4, -0.35],
-    haze: 0xb0bcd0, sky: 0x678bbf, light: 0xe9eeff, ringColor: 0xe1e9ff,
+    haze: 0xbdcbdb, sky: 0x7894b8, light: 0xe9eeff, ringColor: 0xe1e9ff,
     routes: [
-      ['Dune foot', [-20, -30], [-31, -47], 2],
-      ['Western slope', [-32, -52], [-22, -67], 3],
+      ['Snow line', [-20, -30], [-31, -47], 2],
+      ['Western ridge', [-32, -52], [-22, -67], 3],
       ['Shelter', [-14, -80], [3, -107], -3],
     ],
     legs: [
-      wind('The first rise', 'Climb one ring at a time above the western dunes.',
+      wind('The first rise', 'Climb one ring at a time above the snowy ridge.',
         [-25, -31, 7], [-31, -44, 12], [-33, -57, 18], [-26, -71, 24], [-13, -79, 28]),
       wind('Down into shelter', 'Glide along the ridge, then descend to the sheltered glade.',
         [3, -80, 26], [16, -85, 20], [21, -100, 14], [9, -111, 8], [-5, -106, 4]),
       blooms('In the lee', 'Wake eight sheltered blooms close to the grass.', bed('Blooms', 2, 8)),
-      wind('The second rise', 'Climb over the tidal flats and gradually return to the low meadow.',
+      wind('The second rise', 'Climb above the snowfields and gradually return to the sheltered basin.',
         [4, -89, 7], [16, -77, 13], [22, -62, 20], [15, -48, 22], [2, -39, 16], [-10, -27, 9], [-17, -13, 4]),
     ],
   },
   {
     title: 'Last Light',
+    landscape: landscapes.dunes,
     goal: 'Carry the evening light across three glades and ride the final wind toward the sea.',
     finish: 'The coast is quiet. Blue After Dark waits beyond the last light.',
     start: [6, -19, 1.45, -0.22],
-    haze: 0xd0afa1, sky: 0x8c899f, light: 0xffcea3, ringColor: 0xffdaa0,
+    haze: 0xd3ab83, sky: 0xa88778, light: 0xffcea3, ringColor: 0xffdaa0,
     routes: [
       ['Evening grass', [4, -29], [-11, -53], 3],
       ['Amber hollow', [-20, -59], [-34, -91], -4],
@@ -117,7 +124,7 @@ export const levels = [
     legs: [
       blooms('Evening grass', 'Wake eight flowers in the fading light.', bed('Blooms', 0, 8)),
       wind('The amber arc', 'Cross the ridge and turn back into the amber hollow.',
-        [4, -53, 7], [15, -65, 12], [10, -81, 15], [-5, -91, 11], [-18, -85, 5]),
+        [4, -53, 7], [15, -65, 12], [10, -81, 15], [-5, -91, 11], [-18, -84, 5]),
       blooms('Amber hollow', 'Wake nine low flowers in the sheltered hollow.', bed('Blooms', 1, 9)),
       wind('Out of the dunes', 'Cross the length of the dunes and descend toward the shore.',
         [-33, -89, 6], [-26, -105, 11], [-12, -114, 10], [3, -109, 6], [9, -95, 3]),
@@ -128,6 +135,7 @@ export const levels = [
   },
   {
     title: 'Blue After Dark',
+    landscape: landscapes.lagoon,
     goal: 'Follow luminous blue flowers and moonlit wind rings across the meadow at night.',
     finish: 'Every night glade is glowing. You can stay beneath the moon.',
     start: [3, -12, 1.45, -0.18], night: true,
@@ -161,7 +169,7 @@ export function beginLevel(index) {
     rings: (leg.rings ?? []).map(([x, z, height], i, route) => {
       const [fromX, fromZ] = i ? route[i - 1] : [flight.x, flight.z];
       return {
-        x, y: flightSurface(x, z) + height, z,
+        x, y: flightSurface(x, z, level.landscape) + height, z,
         heading: Math.atan2(x - fromX, z - fromZ),
         radius: height >= 6 ? 3.6 : 3.1,
       };

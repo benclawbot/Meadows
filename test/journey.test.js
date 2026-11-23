@@ -3,8 +3,8 @@ import test from 'node:test';
 import { clamp, collectBlooms, flightSurface, stepFlight } from '../src/flight.js';
 import { advanceLeg, beginLevel, bloomObjective, canBloom, crossRing, currentLeg, journeyProgress, journeyTarget, levels, nextRing } from '../src/journey.js';
 
-function position(flight) {
-  return { x: flight.x, y: flightSurface(flight.x, flight.z) + flight.height, z: flight.z };
+function position(flight, level) {
+  return { x: flight.x, y: flightSurface(flight.x, flight.z, level.landscape) + flight.height, z: flight.z };
 }
 
 test('a flight protects future blooms and advances only after the active stage is complete', () => {
@@ -52,8 +52,8 @@ test('all seven extended routes can be completed at cruising speed using the obj
       assert.ok(target, `${level.title} has an outstanding objective without a target`);
       const heading = Math.atan2(target.x - flight.x, flight.z - target.z) - flight.heading;
       const turn = Math.atan2(Math.sin(heading), Math.cos(heading));
-      const from = position(flight);
-      const height = target.y === undefined ? 1.4 : target.y - flightSurface(flight.x, flight.z);
+      const from = position(flight, level);
+      const height = target.y === undefined ? 1.4 : target.y - flightSurface(flight.x, flight.z, level.landscape);
       stepFlight(flight, {
         x: clamp(turn * 1.7, -1, 1),
         y: clamp((height - flight.height) * 0.55, -1, 1),
@@ -61,7 +61,7 @@ test('all seven extended routes can be completed at cruising speed using the obj
       }, 1 / 60);
       const hits = collectBlooms(meadow, flight, from.x, from.z, flower => canBloom(journey, flower));
       for (const { flower } of hits) bloomObjective(journey, flower);
-      crossRing(journey, from, position(flight));
+      crossRing(journey, from, position(flight, level));
       advanceLeg(journey);
     }
     assert.equal(journeyProgress(journey), 1, level.title);

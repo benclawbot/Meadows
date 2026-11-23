@@ -103,3 +103,31 @@ test('bloom notes follow the harmony and the progression brings in new instrumen
   music.playBar(0, BAR);
   assert.deepEqual(new Set(events.map(([instrument]) => instrument)), new Set(['piano', 'cello', 'flute', 'harp']));
 });
+
+test('each flight starts its own arrangement and its bloom notes follow the new harmony', () => {
+  const music = new MeadowScore({});
+  const arrangements = new Set();
+  for (let level = 0; level < 7; level++) {
+    music.stage = 3;
+    music.barNumber = 4;
+    music.lastNote = 72;
+    music.setLevel(level);
+    assert.equal(music.stage, 0);
+    assert.equal(music.barNumber, 0);
+    assert.equal(music.lastNote, null);
+
+    const events = [];
+    music.note = (...event) => events.push(event);
+    music.playBar(0, 0);
+    assert.ok(events.length >= 4);
+    assert.ok(events.every(([, pitch, at, duration]) => Number.isFinite(pitch)
+      && at >= 0 && at < music.bar && duration > 0));
+    arrangements.add(JSON.stringify(events));
+
+    for (const [bar, [, harmony]] of music.phrases.entries()) {
+      const pitch = bloomPitch(bar, 6, null, music.phrases);
+      assert.ok(harmony.some(note => note % 12 === pitch % 12));
+    }
+  }
+  assert.equal(arrangements.size, 7);
+});

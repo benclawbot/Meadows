@@ -199,8 +199,7 @@ function resetMeadow(index) {
   journey = beginLevel(index);
   flight = journey.flight;
   total = activeTime = progress = 0;
-  music.stage = 0;
-  music.lastNote = null;
+  music.setLevel(index);
   view.reset(journey);
   hint.hidden = levelClear.hidden = true;
   byId('level-name').textContent = journey.level.title;
@@ -387,7 +386,7 @@ document.addEventListener('visibilitychange', () => {
 function step(dt) {
   activeTime += dt;
   const x = flight.x, z = flight.z;
-  const from = { x, y: flightSurface(x, z) + flight.height, z };
+  const from = { x, y: flightSurface(x, z, journey.level.landscape) + flight.height, z };
   const { meadow } = journey;
   const destination = journeyTarget(journey);
   const control = sampleControl();
@@ -401,7 +400,7 @@ function step(dt) {
     music.bloom(flower, (flower.x - flight.x) * 0.22, lit);
   }
   const ring = crossRing(journey, from, {
-    x: flight.x, y: flightSurface(flight.x, flight.z) + flight.height, z: flight.z,
+    x: flight.x, y: flightSurface(flight.x, flight.z, journey.level.landscape) + flight.height, z: flight.z,
   });
   if (ring) {
     const chime = { ...ring, color: journey.level.ringColor, tone: currentLeg(journey).passed, glade: 0, voice: 'flute' };
@@ -435,7 +434,7 @@ function frame(now) {
     const heading = Math.atan2(destination.x - flight.x, flight.z - destination.z) - flight.heading;
     bearing.style.transform = `rotate(${heading}rad)`;
   }
-  const delta = destination?.y === undefined ? 0 : destination.y - flightSurface(flight.x, flight.z) - flight.height;
+  const delta = destination?.y === undefined ? 0 : destination.y - flightSurface(flight.x, flight.z, journey.level.landscape) - flight.height;
   const direction = delta > 3.5 ? 'Climb toward the ring' : delta < -3.5 ? 'Descend toward the ring' : '';
   if (heightGuide.textContent !== direction) heightGuide.textContent = direction;
   heightGuide.hidden = !direction;

@@ -1,43 +1,15 @@
+export { channel, flightSurface, terrain, waterHeight } from './landscape.js';
+
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const smooth = (from, to, dt, rate) => from + (to - from) * (1 - Math.exp(-rate * dt));
 const radians = Math.PI / 180;
 const upperAir = 42;
-export const waterHeight = -0.57;
 
 export function randomFrom(seed) {
   return () => {
     seed = (1664525 * seed + 1013904223) >>> 0;
     return seed / 4294967296;
   };
-}
-
-export function channel(x, z) {
-  const center = 23 + 16 * Math.sin((z + 11) * 0.041) - 0.108 * z;
-  const width = 2.6 + 2.4 * (1 + Math.sin(z * 0.042 + 0.8)) + 9 * Math.max(0, (-z - 66) / 130);
-  return (x - center) / width;
-}
-
-function mound(x, z, cx, cz, width, length, height) {
-  return height * Math.exp(-(((x - cx) / width) ** 2 + ((z - cz) / length) ** 2));
-}
-
-export function terrain(x, z) {
-  const hills = 0.73 + 0.28 * Math.sin(x * 0.125 + z * 0.052)
-    + 0.31 * Math.cos(z * 0.17 - x * 0.06)
-    + 0.17 * Math.sin(x * 0.29 - z * 0.14);
-  const dunes = mound(x, z, -35, -38, 19, 27, 4.2)
-    + mound(x, z, -68, -140, 40, 38, 10.5)
-    + mound(x, z, 57, -85, 25, 38, 3.8)
-    + mound(x, z, -16, -125, 23, 25, 3.0)
-    + mound(x, z, 99, -183, 87, 40, 11.0);
-  const inlet = 2.7 * Math.exp(-(channel(x, z) ** 4) * 0.43);
-  const sea = 4.7 * clamp((-z - 126) / 53, 0, 1);
-  const outerShore = 7.0 * Math.max(clamp((Math.abs(x) - 102) / 52, 0, 1), clamp((z - 34) / 35, 0, 1));
-  return hills + dunes - inlet - sea - outerShore;
-}
-
-export function flightSurface(x, z) {
-  return Math.max(waterHeight + 0.3, terrain(x, z));
 }
 
 const gold = { kind: 'gold', color: 0xf7b437, voice: 'harp' };

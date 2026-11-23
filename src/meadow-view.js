@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { channel, clamp, FlightPath, flightSurface, randomFrom, smooth, terrain, waterHeight } from './flight.js';
+import { clamp, FlightPath, randomFrom, smooth } from './flight.js';
+import { channel, flightSurface, terrain, waterHeight } from './landscape.js';
+import { makeWeather, weatherByLandscape } from './weather.js';
 import { currentLeg } from './journey.js';
 
 const fogColor = new THREE.Color(0xa4b2ab);
-const sun = new THREE.Vector3(0.38, 0.20, -0.90).normalize();
 const moon = new THREE.Vector3(-0.32, 0.31, -0.88).normalize();
 const vertex = `
   varying vec3 world;
@@ -28,14 +29,15 @@ const noise = `
   }
 `;
 
-function makeSky(clock, warmth, haze, skyTint, light, night) {
+function makeSky(clock, warmth, haze, skyTint, light, night, air) {
   const material = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    uniforms: { clock, warmth, haze, skyTint, light, night },
+    uniforms: { clock, warmth, haze, skyTint, light, night, air },
     vertexShader: vertex,
     fragmentShader: `
       varying vec3 world;
       uniform vec3 light, haze, skyTint;
+      uniform vec4 air;
       uniform float clock, warmth, night;
       ${noise}
       void main() {
@@ -43,13 +45,13 @@ function makeSky(clock, warmth, haze, skyTint, light, night) {
         float elevation = max(dir.y, 0.);
         float towardSun = max(0., dot(dir, light));
         vec3 zenith = mix(skyTint, skyTint * 1.20, warmth);
-        vec3 horizon = mix(haze * 1.18, vec3(.73,.75,.58), warmth*.62*(1.-night));
+        vec3 horizon = mix(haze * 1.18, vec3(.73,.75,.58), warmth*.20*air.z*(1.-night));
         vec3 color = mix(horizon, zenith, smoothstep(-.045, .63, dir.y));
         color += mix(vec3(.71,.40,.16), vec3(.011,.022,.047), night)
-          * pow(towardSun, 10.) * (.38 + warmth*.27);
-        color += mix(vec3(1.,.75,.39), vec3(.10,.16,.28), night) * pow(towardSun, 72.) * .45;
+          * pow(towardSun, 10.) * (.38 + warmth*.27) * air.z;
+        color += mix(vec3(1.,.75,.39), vec3(.10,.16,.28), night) * pow(towardSun, 72.) * .45 * air.z;
         color += mix(vec3(2.55,1.78,.88), vec3(1.30,1.63,2.10), night)
-          * smoothstep(.99954,.99973,towardSun);
+          * smoothstep(.99954,.99973,towardSun) * air.z;
         if (night > .5) {
           vec2 starUV = vec2(atan(dir.z, dir.x), dir.y) * 144.;
           vec2 cell = floor(starUV);
@@ -59,11 +61,11 @@ function makeSky(clock, warmth, haze, skyTint, light, night) {
         }
         vec2 cloudUV = dir.xz / (elevation + .18);
         cloudUV *= vec2(1.35, 2.25);
-        cloudUV += vec2(clock * .0035, clock * .001);
-        float cloud = smoothstep(.48, .76, fbm(cloudUV));
+        cloudUV += vec2(clock * .015, clock * .004) * air.w;
+        float cloud = smoothstep(.62 - air.y*.44, .81 - air.y*.33, fbm(cloudUV));
         cloud *= smoothstep(.015,.12,elevation) * (1.-smoothstep(.7,.95,elevation));
-        vec3 cloudColor = mix(vec3(.57,.66,.66),vec3(.93,.79,.52),pow(towardSun,4.));
-        color = mix(color, mix(cloudColor,vec3(.022,.039,.076),night), cloud * .52);
+        vec3 cloudColor = mix(skyTint*.64 + haze*.47,vec3(.93,.79,.52),pow(towardSun,4.)*air.z*air.z);
+        color = mix(color, mix(cloudColor,vec3(.022,.039,.076),night), cloud * (.40 + air.y*.48));
         color = mix(haze, color, smoothstep(-.15,.08,dir.y));
         float grain = hash(gl_FragCoord.xy) - .5;
         gl_FragColor = vec4(color + grain*.004,1.);
@@ -71,31 +73,30 @@ function makeSky(clock, warmth, haze, skyTint, light, night) {
       }
     `,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(340, 48, 28), material);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(260, 48, 28), material);
   sky.frustumCulled = false;
   sky.renderOrder = -10;
   return sky;
 }
 
-function makeGround(mobile) {
+function makeGround(mobile, landscape) {
   const surface = new THREE.PlaneGeometry(360, 312, mobile ? 220 : 288, mobile ? 192 : 248);
   surface.rotateX(-Math.PI / 2);
   surface.translate(0, 0, -88);
   const position = surface.attributes.position;
   const colors = new Float32Array(position.count * 3);
-  const dry = new THREE.Color(0x8e8a57);
-  const grass = new THREE.Color(0x516c43);
-  const dark = new THREE.Color(0x3d5a42);
-  const sand = new THREE.Color(0xae9e78);
+  const [dark, grass, dry, sand] = landscape.soil.map(hex => new THREE.Color(hex));
   const color = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     const x = position.getX(i), z = position.getZ(i);
-    const height = terrain(x, z);
+    const height = terrain(x, z, landscape);
     position.setY(i, height);
     const broad = 0.5 + 0.25 * Math.sin(x * 0.20 + z * 0.16) + 0.14 * Math.cos(x * 0.33 - z * 0.23);
     const small = 0.50 + 0.24 * Math.sin(x * 0.92 + z * 0.74) + 0.23 * Math.cos(z * 1.42 - x * 0.32);
     color.copy(dark).lerp(grass, small).lerp(dry, broad * 0.61);
-    if (height < 0.52) color.lerp(sand, clamp((0.52 - height) / 1.46, 0, 1));
+    if (landscape.water && height < 0.52) color.lerp(sand, clamp((0.52 - height) / 1.46, 0, 1));
+    if (landscape.name === 'alpine') color.lerp(sand, clamp((7.5 - height) * 0.08, 0, 0.5) * small);
+    if (landscape.name === 'dunes') color.lerp(dark, 0.19 * (1 + Math.sin(x * 1.07 - z * 0.56)));
     color.toArray(colors, i * 3);
   }
   surface.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -114,37 +115,38 @@ function makeGround(mobile) {
   return new THREE.Mesh(surface, material);
 }
 
-function makeWater(clock, warmth, haze, light, night) {
+function makeWater(clock, warmth, haze, light, night, air, landscape) {
+  const [deep, shallows] = landscape.water.map(hex => new THREE.Color(hex));
   const plane = new THREE.PlaneGeometry(890, 850);
   plane.rotateX(-Math.PI / 2);
   plane.translate(0, waterHeight, -85);
   return new THREE.Mesh(plane, new THREE.ShaderMaterial({
-    uniforms: { clock, warmth, haze, light, night },
+    uniforms: { clock, warmth, haze, light, night, air, deep: { value: deep }, shallows: { value: shallows } },
     vertexShader: vertex,
     fragmentShader: `
       uniform float clock, warmth, night;
-      uniform vec3 light, haze;
+      uniform vec3 light, haze, deep, shallows;
+      uniform vec4 air;
       varying vec3 world;
       ${noise}
       void main() {
         vec3 eye = normalize(cameraPosition-world);
         vec2 p = world.xz;
         float ripple = noise(p*.14) * 2.6;
-        float a = p.x*.66+p.y*1.72-clock*.62+ripple;
-        float b = p.x*1.11-p.y*.82-clock*.43-ripple*.79;
+        float waveTime = clock * (.48 + air.w);
+        float a = p.x*.66+p.y*1.72-waveTime*.62+ripple;
+        float b = p.x*1.11-p.y*.82-waveTime*.43-ripple*.79;
         vec3 n = normalize(vec3(.040*cos(a)+.027*cos(b),1.,.047*cos(a)-.021*cos(b)));
         float f = pow(1.-abs(eye.y), 2.8);
-        vec3 deep = vec3(.045,.18,.18);
-        vec3 reflected = mix(vec3(.20,.35,.35),vec3(.40,.48,.39),warmth);
-        vec3 color = mix(deep, reflected, .28+.70*f);
-        color = mix(color, mix(vec3(.007,.015,.031),vec3(.039,.066,.115),f), night);
+        vec3 reflected = mix(shallows, haze, warmth*.25);
+        vec3 color = mix(deep, reflected, .22+.70*f);
         float gloss = pow(max(dot(reflect(-light,n),eye),0.),110.);
         float glimmer = max(0., sin(a*1.42+sin(b*1.34)*1.8));
         color += mix(vec3(1.2,.86,.40),vec3(.48,.71,1.1),night) * gloss * (0.38 + .62 * glimmer);
         color += mix(vec3(.031,.049,.049),vec3(.004,.009,.02),night)
           * pow(glimmer,5.) * (.25+.75*noise(p*.43));
         float distanceToEye = length(cameraPosition-world);
-        color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*.000090));
+        color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*air.x*air.x));
         gl_FragColor = vec4(color,1.);
         ${colorOutput}
       }
@@ -177,24 +179,26 @@ function grassGeometry() {
   return geometry;
 }
 
-function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile) {
+function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile, landscape, air) {
   const rng = randomFrom(32160);
+  const [base, tips, density, stature, spread] = landscape.plants;
   const geometry = grassGeometry();
   const tuft = [];
   const style = [];
   function plant(x, z, near) {
-    const y = terrain(x, z);
-    if (y < waterHeight + 0.14) return;
-    const reed = Math.abs(channel(x, z)) < 1.37 && z < 15 && rng() < 0.36;
+    const y = terrain(x, z, landscape);
+    if (landscape.water && y < waterHeight + 0.14) return;
+    const reed = landscape.name === 'marsh' ? y < 0.54 && rng() < 0.61
+      : landscape.name === 'meadow' && Math.abs(channel(x, z)) < 1.37 && z < 15 && rng() < 0.36;
     const height = reed ? 0.83 + rng() * 0.81 : 0.25 + rng() * (near ? 0.49 : 0.62);
-    tuft.push(x, y - 0.045, z, height);
-    style.push(rng() * 6.283, 0.56 + rng() * 1.03, rng(), reed ? 1 : 0);
+    tuft.push(x, y - 0.045, z, height * stature);
+    style.push(rng() * 6.283, (0.56 + rng() * 1.03) * spread, rng(), reed ? 1 : 0);
   }
   const foreground = mobile ? 14200 : 29000;
-  for (let i = 0; i < foreground; i++) {
+  for (let i = 0; i < foreground * density; i++) {
     plant((rng() - 0.5) * 98, 20 - rng() * 151, true);
   }
-  for (let i = 0; i < (mobile ? 3700 : 6500); i++) {
+  for (let i = 0; i < (mobile ? 3700 : 6500) * density; i++) {
     plant((rng() - 0.5) * 177, 35 - rng() * 205, false);
   }
   geometry.setAttribute('tuft', new THREE.InstancedBufferAttribute(new Float32Array(tuft), 4));
@@ -205,13 +209,15 @@ function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile) {
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: {
-      clock, warmth, haze, night, wake, pulse, glow,
+      clock, warmth, haze, night, wake, pulse, glow, air,
+      baseTint: { value: new THREE.Color(base) }, tipTint: { value: new THREE.Color(tips) },
       patches: { value: glades.map(glade => new THREE.Vector2(glade.x, glade.z)) },
     },
     vertexShader: `
       attribute vec4 tuft, style;
       uniform float clock;
       uniform vec3 wake;
+      uniform vec4 air;
       varying vec3 world;
       varying vec4 plant;
       void main() {
@@ -219,11 +225,12 @@ function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile) {
         float ca=cos(style.x), sa=sin(style.x);
         local.xz = mat2(ca, -sa, sa, ca)*local.xz * style.y;
         local.y *= tuft.w;
-        float wind = sin(tuft.x*.16 + tuft.z*.11 - clock*1.67);
-        wind += .44*sin(tuft.x*.36 - tuft.z*.27 - clock*2.17);
+        float motion = clock * (.60 + air.w);
+        float wind = sin(tuft.x*.16 + tuft.z*.11 - motion*1.67);
+        wind += .44*sin(tuft.x*.36 - tuft.z*.27 - motion*2.17);
         vec2 away = tuft.xz - wake.xz;
         float wakeWeight = exp(-dot(away,away)*.48) * wake.y;
-        local.xz += (vec2(.22,.14)*(wind+.50) + away*wakeWeight*.42) * position.y*position.y * tuft.w;
+        local.xz += (vec2(.22,.14)*(wind+.50)*(.58+air.w*.55) + away*wakeWeight*.42) * position.y*position.y * tuft.w;
         world = tuft.xyz + local;
         plant = vec4(position.y, style.z, style.w, wind);
         gl_Position = projectionMatrix * viewMatrix * vec4(world,1.);
@@ -231,29 +238,30 @@ function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile) {
     `,
     fragmentShader: `
       uniform float clock, warmth, night, glow[3];
-      uniform vec3 haze, pulse;
+      uniform vec3 haze, pulse, baseTint, tipTint;
+      uniform vec4 air;
       uniform vec2 patches[3];
       varying vec3 world;
       varying vec4 plant;
       void main() {
         float restoration = 0.;
         for(int i=0; i<3; i++) restoration += glow[i]*exp(-dot(world.xz-patches[i],world.xz-patches[i])*.011);
-        vec3 base = mix(vec3(.057,.092,.042),vec3(.21,.25,.082),plant.y*.8);
-        vec3 tip = mix(vec3(.20,.28,.105),vec3(.41,.43,.172),plant.y);
-        tip = mix(tip,vec3(.52,.50,.27),plant.z*.61);
+        vec3 base = baseTint * (.58 + plant.y*.78);
+        vec3 tip = tipTint * (.58 + plant.y*.48);
+        tip = mix(tip,tipTint*.88 + vec3(.09,.08,.03),plant.z*.61);
         vec3 color = mix(base,tip,smoothstep(0.,.96,plant.x));
         color *= .81 + .24 * plant.y + .10*plant.w;
-        color += vec3(.13,.123,.042) * max(0.,plant.w+.1)*plant.x*plant.x;
-        color += vec3(.08,.10,.025)*restoration*(.26+.74*plant.x);
-        color += vec3(.10,.057,.009)*warmth*plant.x;
+        color += tipTint*.25 * max(0.,plant.w+.1)*plant.x*plant.x;
+        color += tipTint*.27*restoration*(.26+.74*plant.x);
+        color += tipTint*.15*warmth*plant.x*air.z;
         float age = max(0.,clock-pulse.z);
         float ring = length(world.xz-pulse.xy)-age*6.0;
         float ripple = exp(-ring*ring*2.0-age*1.8) * plant.x;
-        vec3 nightColor = color * vec3(.08,.16,.31) + vec3(.005,.018,.057) * restoration;
+        vec3 nightColor = color * vec3(.36,.45,.73) + vec3(.005,.018,.057) * restoration;
         color = mix(color, nightColor, night);
         color += mix(vec3(.18,.11,.025), vec3(.023,.12,.36),night) * ripple;
         float distanceToEye = distance(world,cameraPosition);
-        color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*.000090));
+        color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*air.x*air.x));
         gl_FragColor = vec4(color,1.);
         ${colorOutput}
       }
@@ -264,25 +272,28 @@ function makeGrass(clock, warmth, haze, night, wake, pulse, glades, mobile) {
   return { mesh, glow };
 }
 
-function makeRocks() {
+function makeRocks(landscape, mobile) {
   const rng = randomFrom(870);
+  const [color, scale, profile, elongation] = landscape.stone;
+  const stone = new THREE.Color(color);
   const rocks = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(1, 2),
     new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94, flatShading: true }),
-    105,
+    mobile ? 82 : 105,
   );
   const dummy = new THREE.Object3D();
   const shade = new THREE.Color();
   for (let i = 0; i < rocks.count; i++) {
     const z = 12 - rng() * 120;
     const x = i < 60 ? (rng() - 0.5) * 99 : 14 + rng() * 28;
-    const size = i < 10 ? 0.9 + rng() * 1.8 : 0.12 + rng() * 0.74;
-    dummy.position.set(x, Math.max(waterHeight - 0.10, terrain(x, z)) - size * 0.15, z);
-    dummy.rotation.set(rng() * 1.5, rng() * 7, rng() * 0.8);
-    dummy.scale.set(size, size * (0.4 + rng() * 0.4), size * (0.66 + rng() * 0.45));
+    const size = scale * (i < 15 ? 0.8 + rng() * 1.6 : 0.12 + rng() * 0.81);
+    const height = terrain(x, z, landscape);
+    dummy.position.set(x, height - size * 0.15, z);
+    dummy.rotation.set(rng() * 0.6, rng() * 7, rng() * 0.35);
+    dummy.scale.set(size, size * profile * (0.68 + rng() * 0.58), size * elongation * (0.66 + rng() * 0.45));
     dummy.updateMatrix();
     rocks.setMatrixAt(i, dummy.matrix);
-    shade.setHSL(0.12 + rng() * 0.04, 0.06 + rng() * 0.12, 0.26 + rng() * 0.21);
+    shade.copy(stone).multiplyScalar(0.66 + rng() * 0.57);
     rocks.setColorAt(i, shade);
   }
   return rocks;
@@ -403,10 +414,12 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
   const clock = { value: 0 }, warmth = { value: 0 }, haze = { value: fogColor.clone() };
   const skyTint = { value: new THREE.Color() };
   const night = { value: 0 };
-  const light = { value: sun.clone() };
+  const light = { value: new THREE.Vector3() };
+  const air = { value: new THREE.Vector4() };
   const wake = { value: new THREE.Vector3() };
   const pulse = { value: new THREE.Vector3(0, 0, -20) };
-  const grass = makeGrass(clock, warmth, haze, night, wake, pulse, journey.meadow.glades, mobile);
+  let grass, weather, landscape;
+  const scenery = new THREE.Group();
   const ambient = new THREE.HemisphereLight(0xe5f1ff, 0x6a6740, 1.75);
   const sunlight = new THREE.DirectionalLight(0xffe4ab, 2.15);
   const dot = softDot();
@@ -426,9 +439,8 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     color: 0xf9eaca, size: 0.20, map: dot, transparent: true, opacity: 0.51, depthWrite: false, fog: true,
   }));
   wisps.frustumCulled = false;
-  scene.add(makeSky(clock, warmth, haze, skyTint, light, night), makeGround(mobile),
-    makeWater(clock, warmth, haze, light, night), grass.mesh,
-    makeRocks(), flowers.group, petals, wisps, marker, ...rings, ambient, sunlight);
+  const sky = makeSky(clock, warmth, haze, skyTint, light, night, air);
+  scene.add(sky, scenery, flowers.group, petals, wisps, marker, ...rings, ambient, sunlight);
 
   const dummy = new THREE.Object3D();
   const target = new THREE.Vector3();
@@ -468,7 +480,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     const { blossoms, hearts, stems } = flowers;
     for (let i = 0; i < meadow.flowers.length; i++) {
       const flower = meadow.flowers[i];
-      const base = terrain(flower.x, flower.z);
+      const base = flightSurface(flower.x, flower.z, landscape);
       const stem = 0.58 + 0.31 * (0.5 + 0.5 * Math.sin(i * 5.13));
       const sway = Math.sin(time * 1.56 + flower.x * 0.18 + flower.z * 0.15) * 0.15;
       const height = base + stem;
@@ -503,7 +515,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
   }
 
   function drawFlight(flight, time, dt, total, destination, active) {
-    const y = flightSurface(flight.x, flight.z) + flight.height;
+    const y = flightSurface(flight.x, flight.z, landscape) + flight.height;
     const forwardX = Math.sin(flight.heading), forwardZ = -Math.cos(flight.heading);
     if (active) path.add(flight.x, y, flight.z);
     dummy.position.set(flight.x, y + Math.sin(time * 2.9) * 0.066, flight.z);
@@ -558,7 +570,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       const x = flight.x + wx / distance * flow + wz / distance * lateral;
       const z = flight.z + wz / distance * flow - wx / distance * lateral;
       windPoints[i * 3] = x;
-      const low = Math.max(terrain(x, z), waterHeight) + 1.05;
+      const low = flightSurface(x, z, landscape) + 1.05;
       const height = destination?.y === undefined ? low : THREE.MathUtils.lerp(y, destination.y, Math.min(1, flow / distance));
       windPoints[i * 3 + 1] = Math.max(low, height) + Math.sin(i * 3.8 + time * 1.18) * 0.44;
       windPoints[i * 3 + 2] = z;
@@ -570,7 +582,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       const trailing = (lastWidth < lastHeight ? 5.8 : 5.0) + overview * 2.65;
       const cx = flight.x - forwardX * trailing;
       const cz = flight.z - forwardZ * trailing;
-      target.set(cx, Math.max(y + 1.56 + overview * 2.35, terrain(cx, cz) + 2.35), cz);
+      target.set(cx, Math.max(y + 1.56 + overview * 2.35, flightSurface(cx, cz, landscape) + 2.35), cz);
       eye.lerp(target, reposition ? 1 : 1 - Math.exp(-5.2 * dt));
       target.set(flight.x + forwardX * 11, y - 0.25 - overview * 7.1 + flight.rise * 1.6,
         flight.z + forwardZ * 11);
@@ -582,6 +594,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       look.set(3.6, 1.56, -25);
     }
     camera.position.copy(eye);
+    sky.position.copy(eye);
     camera.lookAt(look);
     if (!reduced && active) camera.rotateZ(flight.steer * -0.027);
   }
@@ -593,14 +606,34 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
     lightStage = 0;
     reposition = true;
     const { level, meadow } = journey;
+    if (landscape !== level.landscape) {
+      for (const mesh of scenery.children) {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+        if (mesh.isInstancedMesh) mesh.dispose();
+      }
+      scenery.clear();
+      landscape = level.landscape;
+      const [fog, cloud, sunlightStrength, wind] = landscape.atmosphere;
+      scene.fog.density = fog;
+      air.value.set(fog, cloud, sunlightStrength, wind);
+      grass = makeGrass(clock, warmth, haze, night, wake, pulse, meadow.glades, mobile, landscape, air);
+      scenery.add(makeGround(mobile, landscape), grass.mesh, makeRocks(landscape, mobile));
+      if (landscape.water) scenery.add(makeWater(clock, warmth, haze, light, night, air, landscape));
+      weather = makeWeather(weatherByLandscape[landscape.name], landscape, dot, mobile, reduced);
+      if (weather) scenery.add(weather.mesh);
+    }
+    grass.glow.value.fill(0);
     levelFog.setHex(level.haze);
     skyTint.value.setHex(level.sky);
     night.value = level.night ? 1 : 0;
-    light.value.copy(level.night ? moon : sun);
+    const sunHeight = landscape.name === 'dunes' ? 0.058 : 0.31;
+    if (level.night) light.value.copy(moon);
+    else light.value.set(0.38, sunHeight, -0.90).normalize();
     sunlight.position.copy(light.value).multiplyScalar(56);
     sunlight.color.setHex(level.light);
     ambient.color.setHex(level.night ? 0xa6caff : 0xe5f1ff);
-    ambient.groundColor.setHex(level.night ? 0x2a384b : 0x6a6740);
+    ambient.groundColor.setHex(level.night ? 0x2a384b : landscape.soil[0]);
     ambient.intensity = level.night ? 0.78 : 1.75;
     flowers.blossoms.material.emissive.setHex(level.night ? 0x275eff : 0x888888);
     flowers.blossoms.material.emissiveIntensity = level.night ? 0.58 : 0.075;
@@ -632,9 +665,9 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       const { meadow } = journey;
       lightStage = smooth(lightStage, progress, dt, 0.32);
       warmth.value = lightStage;
-      haze.value.copy(levelFog).lerp(warmFog, lightStage * 0.36 * (1 - night.value));
+      haze.value.copy(levelFog).lerp(warmFog, lightStage * landscape.atmosphere[4]);
       scene.fog.color.copy(haze.value);
-      sunlight.intensity = night.value ? 0.68 : 2.05 + lightStage * 0.42;
+      sunlight.intensity = night.value ? 0.68 : 0.52 + air.value.z * (1.55 + lightStage * 0.42);
       for (let i = 0; i < meadow.glades.length; i++) {
         const glade = meadow.glades[i];
         glade.glow = smooth(glade.glow, glade.lit ? 1 : 0, dt, 0.76);
@@ -642,7 +675,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       }
       marker.visible = active && destination?.glade !== undefined;
       if (marker.visible) {
-        marker.position.set(destination.x, terrain(destination.x, destination.z) + 1.55, destination.z);
+        marker.position.set(destination.x, flightSurface(destination.x, destination.z, landscape) + 1.55, destination.z);
         marker.scale.setScalar(1.3 + (reduced ? 0 : Math.sin(time * 2.1) * 0.14));
         marker.material.color.setHex(destination.color);
       }
@@ -658,6 +691,7 @@ export function createMeadowView(canvas, journey, mobile, reduced) {
       });
       drawFlowers(time, destination);
       drawFlight(flight, time, dt, total, destination, active);
+      weather?.draw(camera, time);
       renderer.render(scene, camera);
     },
     bloom(total, flower, time) {
