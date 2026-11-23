@@ -81,6 +81,7 @@ h1 {
   line-height: 1.55;
 }
 .introduction button { pointer-events: auto; }
+.introduction .quiet { margin-left: 0.35rem; }
 #start-error { max-width: 30rem; margin-bottom: 0; }
 
 .primary {
@@ -119,7 +120,7 @@ h1 {
   pointer-events: none;
   text-align: center;
 }
-.hint, .milestone {
+.hint, .level-clear {
   color: var(--ink);
   background: #26372de8;
   border-radius: 8px;
@@ -128,7 +129,40 @@ h1 {
   font-size: 0.94rem;
   line-height: 1.45;
 }
-.milestone { background: #26372df5; }
+.level-clear { background: #26372df5; pointer-events: auto; padding: 0.85rem; }
+.level-clear p { margin: 0 0 0.65rem; text-wrap: balance; }
+.clear-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 0.45rem; }
+.objective {
+  position: absolute;
+  top: max(1rem, calc(env(safe-area-inset-top) + 0.5rem));
+  left: max(1rem, calc(env(safe-area-inset-left) + 0.5rem));
+  max-width: min(28rem, calc(100% - 19rem));
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+  padding: 0.64rem 0.82rem;
+  background: #24332be8;
+  border: 1px solid #e3d5a94d;
+  border-radius: 8px;
+  pointer-events: none;
+}
+.objective h2 { margin: 0; font-size: 1.45rem; line-height: 1; }
+.objective p { margin: 0.24rem 0 0; font-size: 0.9rem; line-height: 1.34; }
+#level-progress { color: #f1db9f; }
+.bearing {
+  flex: 0 0 1.8rem;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e3d5a970;
+  border-radius: 50%;
+}
+.bearing span {
+  width: 0.75rem;
+  height: 0.9rem;
+  background: var(--paper);
+  clip-path: polygon(50% 0, 100% 100%, 50% 75%, 0 100%);
+}
 
 dialog {
   color: var(--ink);
@@ -144,7 +178,19 @@ dialog h2 { margin: 0; font-size: clamp(2.2rem, 7vw, 3.15rem); line-height: 0.91
 dialog p { font-size: 1rem; line-height: 1.5; margin: 1rem 0 1.3rem; }
 .pause-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; }
 #input-help { margin-bottom: 0; }
+.flight-map ol { padding: 0; list-style: none; display: grid; gap: 0.48rem; }
+.flight-map li button { text-align: left; width: 100%; display: grid; gap: 0.16rem; }
+.flight-map li button:disabled { cursor: default; }
+.flight-map li span { font-weight: 400; font-size: 0.9rem; }
+.flight-map li .flight-status { color: #f1db9f; }
 noscript { position: absolute; left: 1rem; top: 1rem; }
+
+@media (max-width: 690px) {
+  .objective {
+    top: max(4.45rem, calc(env(safe-area-inset-top) + 3.95rem));
+    max-width: calc(100% - 2rem - env(safe-area-inset-left) - env(safe-area-inset-right));
+  }
+}
 
 @media (max-width: 550px) {
   #title-screen {

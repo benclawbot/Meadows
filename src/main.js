@@ -1,4 +1,5 @@
-import { collectBlooms, curve, makeMeadow, nearbyBloomTurn, newFlight, smooth, stepFlight, tiltControl } from './flight.js';
+import { collectBlooms, curve, flightSurface, nearbyBloomTurn, smooth, stepFlight, tiltControl } from './flight.js';
+import { beginLevel, bloomObjective, crossRing, journeyProgress, journeyTarget, levels } from './journey.js';
 import { createMeadowView } from './meadow-view.js';
 import { MeadowScore } from './score.js';
 import piano45 from '../samples/piano45.mp3';
@@ -24,28 +25,41 @@ const begin = byId('begin');
 const title = byId('title-screen');
 const paused = byId('paused');
 const hint = byId('hint');
-const milestone = byId('milestone');
+const mapDialog = byId('flight-map');
+const levelList = byId('level-list');
+const levelProgress = byId('level-progress');
+const bearing = byId('bearing');
+const levelClear = byId('level-clear');
+const nextLevel = byId('next-level');
 const inputHelp = byId('input-help');
 const touchDevice = matchMedia('(pointer: coarse)').matches
   || (navigator.maxTouchPoints > 0 && matchMedia('(hover: none)').matches);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const meadow = makeMeadow();
+const progressKey = 'salt-meadow-levels-cleared';
 const music = new MeadowScore({
   piano45, piano53, piano61, piano69, piano77,
   cello35, cello45, cello52, cello59, cello65,
   flute60, flute69, flute76, harp59, harp69, harp79,
 });
 
-let flight = newFlight();
+let clearedLevels = 0;
+try {
+  const saved = Number(localStorage.getItem(progressKey));
+  if (Number.isInteger(saved) && saved >= 0 && saved <= levels.length) clearedLevels = saved;
+} catch {
+  // Progress can still unlock flights for the current session.
+}
+let levelIndex = clearedLevels === levels.length ? 0 : clearedLevels;
+let journey = beginLevel(levelIndex);
+let flight = journey.flight;
 let view;
 let playing = false;
 let started = false;
 let total = 0;
-let completed = 0;
 let time = 0;
 let activeTime = 0;
 let hintUntil = 0;
-let milestoneUntil = 0;
+let progress = 0;
 let mode = touchDevice ? 'touch' : 'mouse';
 let motionReference = null;
 let motionReading = null;
@@ -166,21 +180,24 @@ function sampleControl() {
   return { x: Math.sign(axisX) || axes[0], y: Math.sign(axisY) || axes[1], gust: gust || keys.has(' ') };
 }
 
-function resetMeadow() {
-  flight = newFlight();
-  total = completed = activeTime = 0;
-  for (const flower of meadow.flowers) {
-    flower.bloomed = false;
-    flower.growth = 0;
-  }
-  for (const glade of meadow.glades) {
-    glade.lit = false;
-    glade.count = glade.glow = 0;
-  }
+function showProgress() {
+  const counts = journey.groups.map(group => `${group.label} ${group.progress}/${group.count}`);
+  if (journey.rings.length) counts.push(`Wind rings ${journey.passed}/${journey.rings.length}`);
+  levelProgress.textContent = progress === 1 ? 'Flight complete' : counts.join(' · ');
+}
+
+function resetMeadow(index) {
+  levelIndex = index;
+  journey = beginLevel(index);
+  flight = journey.flight;
+  total = activeTime = progress = 0;
   music.stage = 0;
   music.lastNote = null;
-  view.reset();
-  milestone.hidden = true;
+  view.reset(journey);
+  hint.hidden = levelClear.hidden = true;
+  byId('level-name').textContent = journey.level.title;
+  byId('level-goal').textContent = journey.level.goal;
+  showProgress();
 }
 
 function pauseFlight() {
@@ -203,21 +220,83 @@ function resumeFlight() {
   startSound();
 }
 
-begin.addEventListener('click', () => {
+function startLevel(index) {
+  const firstFlight = !started;
   started = true;
+  if (mapDialog.open) mapDialog.close();
+  resetMeadow(index);
+  playing = false;
   title.hidden = true;
   byId('flight-controls').hidden = false;
-  if (touchDevice) void useTilt();
+  byId('objective').hidden = false;
+  if (touchDevice && firstFlight) void useTilt();
   resumeFlight();
-  if (!touchDevice) sayHint(guidance());
+  if (firstFlight && !touchDevice) sayHint(guidance());
+}
+
+function showFlightMap() {
+  if (playing) pauseFlight();
+  if (paused.open) paused.close();
+  levelList.replaceChildren(...levels.map((level, index) => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    const name = document.createElement('strong');
+    const goal = document.createElement('span');
+    const status = document.createElement('span');
+    button.type = 'button';
+    button.className = 'quiet';
+    button.disabled = index > clearedLevels;
+    name.textContent = `${index + 1}. ${level.title}`;
+    goal.textContent = level.goal;
+    status.className = 'flight-status';
+    status.textContent = index < clearedLevels ? 'Completed' : button.disabled ? 'Locked' : 'Open';
+    button.append(name, goal, status);
+    button.addEventListener('click', () => startLevel(index));
+    item.append(button);
+    return item;
+  }));
+  mapDialog.showModal();
+}
+
+function closeFlightMap() {
+  mapDialog.close();
+  if (started) paused.showModal();
+  else byId('level-map').focus();
+}
+
+function finishFlight() {
+  if (levelIndex === clearedLevels) {
+    clearedLevels++;
+    try {
+      localStorage.setItem(progressKey, String(clearedLevels));
+    } catch {
+      // The current session still retains its unlocked flights.
+    }
+  }
+  byId('clear-message').textContent = journey.level.finish;
+  nextLevel.textContent = levelIndex + 1 < levels.length ? `Next · ${levels[levelIndex + 1].title}` : 'Flight map';
+  levelClear.hidden = false;
+}
+
+begin.addEventListener('click', () => startLevel(levelIndex));
+byId('level-map').addEventListener('click', showFlightMap);
+byId('pause-map').addEventListener('click', showFlightMap);
+byId('close-map').addEventListener('click', closeFlightMap);
+mapDialog.addEventListener('cancel', event => {
+  event.preventDefault();
+  closeFlightMap();
+});
+nextLevel.addEventListener('click', () => {
+  if (levelIndex + 1 < levels.length) startLevel(levelIndex + 1);
+  else showFlightMap();
+});
+byId('stay').addEventListener('click', () => {
+  levelClear.hidden = true;
+  canvas.focus({ preventScroll: true });
 });
 byId('pause').addEventListener('click', pauseFlight);
 byId('resume').addEventListener('click', resumeFlight);
-byId('restart').addEventListener('click', () => {
-  resetMeadow();
-  resumeFlight();
-  sayHint(guidance());
-});
+byId('restart').addEventListener('click', () => startLevel(levelIndex));
 byId('sound').addEventListener('click', event => {
   const muted = !music.muted;
   music.setMute(muted);
@@ -301,25 +380,35 @@ document.addEventListener('visibilitychange', () => {
 function step(dt) {
   activeTime += dt;
   const x = flight.x, z = flight.z;
+  const from = { x, y: flightSurface(x, z) + flight.height, z };
+  const { meadow } = journey;
+  const destination = journeyTarget(journey);
   const control = sampleControl();
-  if (Math.abs(control.x) < 0.025 && flight.height < 2.3) control.x = nearbyBloomTurn(meadow, flight);
+  if (Math.abs(control.x) < 0.025 && flight.height < 2.3 && destination?.y === undefined) {
+    control.x = nearbyBloomTurn(meadow, flight, destination);
+  }
   stepFlight(flight, control, dt);
   for (const { flower, completed: lit } of collectBlooms(meadow, flight, x, z)) {
-    total++;
-    view.bloom(total, flower, time);
-    if (lit) {
-      completed++;
-      music.stage = completed;
-      milestone.textContent = completed === 3
-        ? 'The meadow is in bloom. Stay as long as you like.'
-        : `${meadow.glades[flower.glade].name} are in bloom.`;
-      milestone.hidden = false;
-      milestoneUntil = activeTime + 6.5;
-    }
+    bloomObjective(journey, flower);
+    view.bloom(++total, flower, time);
     music.bloom(flower, (flower.x - flight.x) * 0.22, lit);
   }
+  const ring = crossRing(journey, from, {
+    x: flight.x, y: flightSurface(flight.x, flight.z) + flight.height, z: flight.z,
+  });
+  if (ring) {
+    const chime = { ...ring, color: journey.level.ringColor, tone: journey.passed, glade: 0, voice: 'flute' };
+    view.bloom(++total, chime, time);
+    music.bloom(chime, 0, false);
+  }
+  const updated = journeyProgress(journey);
+  if (updated !== progress) {
+    progress = updated;
+    music.stage = Math.floor(progress * 3);
+    showProgress();
+    if (progress === 1) finishFlight();
+  }
   if (activeTime >= hintUntil) hint.hidden = true;
-  if (activeTime >= milestoneUntil) milestone.hidden = true;
   for (const flower of meadow.flowers) {
     if (flower.bloomed && flower.growth < 0.999) flower.growth = smooth(flower.growth, 1, dt, 5.8);
   }
@@ -332,14 +421,22 @@ function frame(now) {
   previousTime = now;
   if (playing || !started) time += dt;
   if (playing) step(dt);
-  view.draw(flight, time, dt, total, meadow.glades.findIndex(glade => !glade.lit), started);
+  const destination = started ? journeyTarget(journey) : undefined;
+  bearing.hidden = !destination;
+  if (destination) {
+    const heading = Math.atan2(destination.x - flight.x, flight.z - destination.z) - flight.heading;
+    bearing.style.transform = `rotate(${heading}rad)`;
+  }
+  view.draw(flight, time, dt, total, destination, progress, started);
   requestAnimationFrame(frame);
 }
 
 try {
-  view = createMeadowView(canvas, meadow, touchDevice, reducedMotion);
-  view.draw(flight, 0, 0, 0, 0, false);
+  view = createMeadowView(canvas, journey, touchDevice, reducedMotion);
+  view.draw(flight, 0, 0, 0, undefined, 0, false);
   begin.disabled = false;
+  begin.textContent = levelIndex > 0 ? 'Continue drifting' : 'Begin drifting';
+  byId('level-map').disabled = false;
   requestAnimationFrame(frame);
 } catch (error) {
   console.error(error);

@@ -2,6 +2,7 @@ export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const smooth = (from, to, dt, rate) => from + (to - from) * (1 - Math.exp(-rate * dt));
 const radians = Math.PI / 180;
 const upperAir = 42;
+export const waterHeight = -0.57;
 
 export function randomFrom(seed) {
   return () => {
@@ -35,27 +36,31 @@ export function terrain(x, z) {
   return hills + dunes - inlet - sea - outerShore;
 }
 
-const gold = { color: 0xf7b437, voice: 'harp' };
-const coral = { color: 0xf67365, voice: 'piano' };
-const cream = { color: 0xffedd4, voice: 'piano' };
-const lavender = { color: 0xc5afea, voice: 'flute' };
-const blue = { color: 0xa7c4ef, voice: 'flute' };
-const rose = { color: 0xde5089, voice: 'piano' };
+export function flightSurface(x, z) {
+  return Math.max(waterHeight + 0.3, terrain(x, z));
+}
+
+const gold = { kind: 'gold', color: 0xf7b437, voice: 'harp' };
+const coral = { kind: 'coral', color: 0xf67365, voice: 'piano' };
+const cream = { kind: 'cream', color: 0xffedd4, voice: 'piano' };
+const lavender = { kind: 'lavender', color: 0xc5afea, voice: 'flute' };
+const blue = { kind: 'blue', color: 0xa7c4ef, voice: 'flute' };
+const rose = { kind: 'rose', color: 0xde5089, voice: 'piano' };
 const patches = [
   { x: -3, z: -13, name: 'The shallows', palette: [gold, coral, cream, lavender], start: [1, 2], end: [-8, -27] },
   { x: -24, z: -45, name: 'The reed banks', palette: [coral, cream, blue, gold, rose], start: [-12, -29], end: [-20, -61] },
   { x: 3, z: -83, name: 'The tidal flats', palette: [lavender, gold, blue, rose, cream], start: [-14, -64], end: [12, -102] },
 ];
 
-export function makeMeadow() {
+export function makeMeadow(routes) {
   const rng = randomFrom(8129);
   const flowers = [];
   const glades = patches.map((patch, id) => {
-    const [sx, sz] = patch.start;
-    const [ex, ez] = patch.end;
+    const [name, [sx, sz], [ex, ez], bend] = routes?.[id]
+      ?? [patch.name, patch.start, patch.end, id === 1 ? -8 : 3.4];
     for (let i = 0; i < 12; i++) {
       const t = i / 11;
-      const x = sx + (ex - sx) * t + Math.sin(t * Math.PI * 2) * (id === 1 ? -8 : 3.4);
+      const x = sx + (ex - sx) * t + Math.sin(t * Math.PI * 2) * bend;
       const z = sz + (ez - sz) * t;
       const offset = i === 0 ? 0 : (rng() - 0.5) * 1.7;
       const kind = patch.palette[i % patch.palette.length];
@@ -69,7 +74,8 @@ export function makeMeadow() {
         });
       }
     }
-    return { ...patch, count: 0, lit: false, glow: 0 };
+    const center = routes ? { x: (sx + ex) / 2, z: (sz + ez) / 2 } : { x: patch.x, z: patch.z };
+    return { ...center, name, count: 0, lit: false, glow: 0 };
   });
   return { flowers, glades };
 }
@@ -118,11 +124,11 @@ export function stepFlight(flight, controls, dt) {
   flight.z -= Math.cos(flight.heading) * flight.speed * dt;
 }
 
-export function nearbyBloomTurn(meadow, flight) {
+export function nearbyBloomTurn(meadow, flight, target) {
   let best = 1.8;
   let turn = 0;
   for (const flower of meadow.flowers) {
-    if (flower.bloomed) continue;
+    if (flower.bloomed || (target && flower !== target)) continue;
     const dx = flower.x - flight.x, dz = flower.z - flight.z;
     const distance = Math.hypot(dx, dz);
     if (distance < 1.5 || distance > 9.5) continue;
@@ -199,7 +205,7 @@ export function collectBlooms(meadow, flight, previousX, previousZ) {
     flower.bloomed = true;
     const glade = meadow.glades[flower.glade];
     glade.count++;
-    const completed = glade.count === 7;
+    const completed = glade.count === 7 && !glade.lit;
     glade.lit ||= completed;
     return { flower, completed };
   });

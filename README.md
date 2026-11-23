@@ -13,9 +13,20 @@ Salt Meadow is a meditative 3D flight game set in a tidal meadow. You steer a br
 
 Passing a bud opens the flower, adds its colour to your trail, and plays a note that fits the current harmony. Gold flowers sound a harp, warm pinks and whites sound a piano, and lavender and blue add flute. You decide the timing by how you fly.
 
-As each of the three patches comes into bloom, more instruments join the chamber score and the light warms. After the last patch, stay and drift for as long as you like.
+As you make progress through a flight, more instruments join the chamber score and the light warms.
 
 ![A trail of gold, coral, and white petals climbing above the tidewater](screenshots/flight.jpg)
+
+### Flights
+
+1. **First Light** — Wake seven flowers in the shallows.
+2. **Reedbank Waltz** — Open four flowers in each of three reed beds.
+3. **Tideglass** — Follow five low wind rings along the tidal channel.
+4. **A Basket of Color** — Gather two gold, two lavender, and two blue blooms.
+5. **The Long Exhale** — Climb through three rings, then descend through two.
+6. **Last Light** — Wake three flowers in each glade, then follow three rings toward the sea.
+
+Finishing a flight opens the next. Keep drifting when you reach a goal or open the Flight map to replay any unlocked route. Progress is saved in your browser.
 
 ### Play
 

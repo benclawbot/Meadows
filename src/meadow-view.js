@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { channel, clamp, FlightPath, randomFrom, smooth, terrain } from './flight.js';
+import { channel, clamp, FlightPath, flightSurface, randomFrom, smooth, terrain, waterHeight } from './flight.js';
+import { nextRing } from './journey.js';
 
-const waterHeight = -0.57;
 const fogColor = new THREE.Color(0xa4b2ab);
 const sun = new THREE.Vector3(0.38, 0.20, -0.90).normalize();
 const vertex = `
@@ -27,21 +27,21 @@ const noise = `
   }
 `;
 
-function makeSky(clock, warmth, haze) {
+function makeSky(clock, warmth, haze, skyTint) {
   const material = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    uniforms: { clock, warmth, haze, light: { value: sun } },
+    uniforms: { clock, warmth, haze, skyTint, light: { value: sun } },
     vertexShader: vertex,
     fragmentShader: `
       varying vec3 world;
-      uniform vec3 light, haze;
+      uniform vec3 light, haze, skyTint;
       uniform float clock, warmth;
       ${noise}
       void main() {
         vec3 dir = normalize(world - cameraPosition);
         float elevation = max(dir.y, 0.);
         float towardSun = max(0., dot(dir, light));
-        vec3 zenith = mix(vec3(.15,.35,.43), vec3(.20,.41,.53), warmth);
+        vec3 zenith = mix(skyTint, skyTint * 1.20, warmth);
         vec3 horizon = mix(haze * 1.18, vec3(.73,.75,.58), warmth*.62);
         vec3 color = mix(horizon, zenith, smoothstep(-.045, .63, dir.y));
         color += vec3(.71,.40,.16) * pow(towardSun, 10.) * (.38 + warmth*.27);
@@ -286,8 +286,7 @@ function softDot() {
   return new THREE.CanvasTexture(canvas);
 }
 
-function makeFlowers(meadow, dot) {
-  const count = meadow.flowers.length;
+function makeFlowers(count, dot) {
   const group = new THREE.Group();
   const stems = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.015, 0.029, 1, 8, 2),
@@ -310,15 +309,18 @@ function makeFlowers(meadow, dot) {
     color: 0xffecbf, map: dot, transparent: true, opacity: 0.72, depthWrite: false, size: 0.86,
   }));
   const bud = new THREE.Color();
-  for (let i = 0; i < count; i++) {
-    bud.setHex(meadow.flowers[i].color);
-    for (let petal = 0; petal < 5; petal++) {
-      blossoms.setColorAt(i * 5 + petal, bud);
+  function recolor(flowers) {
+    for (let i = 0; i < count; i++) {
+      bud.setHex(flowers[i].color);
+      for (let petal = 0; petal < 5; petal++) {
+        blossoms.setColorAt(i * 5 + petal, bud);
+      }
     }
+    blossoms.instanceColor.needsUpdate = true;
   }
   for (const mesh of [stems, blossoms, hearts, glints]) mesh.frustumCulled = false;
   group.add(stems, blossoms, hearts, glints);
-  return { group, stems, blossoms, hearts, glints };
+  return { group, stems, blossoms, hearts, glints, recolor };
 }
 
 function makePetalTexture() {
@@ -374,7 +376,7 @@ function makePetals() {
   return mesh;
 }
 
-export function createMeadowView(canvas, meadow, mobile, reduced) {
+export function createMeadowView(canvas, journey, mobile, reduced) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, alpha: false, powerPreference: 'high-performance' });
   renderer.setClearColor(0xa4b2ab);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -383,15 +385,23 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
   scene.fog = new THREE.FogExp2(fogColor, 0.0095);
   const camera = new THREE.PerspectiveCamera(53, 1, 0.065, 355);
   const clock = { value: 0 }, warmth = { value: 0 }, haze = { value: fogColor.clone() };
+  const skyTint = { value: new THREE.Color() };
   const wake = { value: new THREE.Vector3() };
   const pulse = { value: new THREE.Vector3(0, 0, -20) };
-  const grass = makeGrass(clock, warmth, haze, wake, pulse, meadow.glades, mobile);
+  const grass = makeGrass(clock, warmth, haze, wake, pulse, journey.meadow.glades, mobile);
   const ambient = new THREE.HemisphereLight(0xe5f1ff, 0x6a6740, 1.75);
   const sunlight = new THREE.DirectionalLight(0xffe4ab, 2.15);
   sunlight.position.copy(sun).multiplyScalar(56);
   const dot = softDot();
-  const flowers = makeFlowers(meadow, dot);
+  const flowers = makeFlowers(journey.meadow.flowers.length, dot);
   const petals = makePetals();
+  const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: dot, color: 0xffecbf, opacity: 0.95, depthWrite: false, toneMapped: false,
+  }));
+  const ringGeometry = new THREE.TorusGeometry(1, 0.025, 8, 72);
+  const rings = Array.from({ length: 5 }, () => new THREE.Mesh(ringGeometry, new THREE.MeshBasicMaterial({
+    transparent: true, depthWrite: false, toneMapped: false,
+  })));
   const winds = new THREE.BufferGeometry();
   const windPoints = new Float32Array(108);
   winds.setAttribute('position', new THREE.BufferAttribute(windPoints, 3));
@@ -399,14 +409,15 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     color: 0xf9eaca, size: 0.20, map: dot, transparent: true, opacity: 0.51, depthWrite: false, fog: true,
   }));
   wisps.frustumCulled = false;
-  scene.add(makeSky(clock, warmth, haze), makeGround(mobile), makeWater(clock, warmth, haze), grass.mesh,
-    makeRocks(), flowers.group, petals, wisps, ambient, sunlight);
+  scene.add(makeSky(clock, warmth, haze, skyTint), makeGround(mobile), makeWater(clock, warmth, haze), grass.mesh,
+    makeRocks(), flowers.group, petals, wisps, marker, ...rings, ambient, sunlight);
 
   const dummy = new THREE.Object3D();
   const target = new THREE.Vector3();
   const eye = new THREE.Vector3(8, 5.35, 14);
   const look = new THREE.Vector3(-0.8, 1.8, -24);
   const warmFog = new THREE.Color(0xc1b89d);
+  const levelFog = new THREE.Color();
   let path = new FlightPath();
   const petalShape = randomFrom(62023);
   const flutter = Array.from({ length: 68 }, () => ({
@@ -419,7 +430,7 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
   const pose = { x: 0, y: 0, z: 0, heading: 0, pitch: 0 };
   const tint = new THREE.Color();
   petals.setColorAt(0, tint.setHex(0xffedd4));
-  let lightStage = 0, lastWidth = 0, lastHeight = 0;
+  let lightStage = 0, lastWidth = 0, lastHeight = 0, reposition = true;
 
   function resize() {
     const { clientWidth: width, clientHeight: height } = canvas;
@@ -434,7 +445,8 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     camera.updateProjectionMatrix();
   }
 
-  function drawFlowers(time, next) {
+  function drawFlowers(time, destination) {
+    const { meadow } = journey;
     const highlights = flowers.glints.geometry.attributes.position;
     const { blossoms, hearts, stems } = flowers;
     for (let i = 0; i < meadow.flowers.length; i++) {
@@ -465,15 +477,15 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
         dummy.updateMatrix();
         blossoms.setMatrixAt(i * 5 + p, dummy.matrix);
       }
-      const visible = flower.glade === next && !flower.bloomed;
+      const visible = flower.glade === destination?.glade && !flower.bloomed;
       highlights.setXYZ(i, sx, visible ? height + 0.27 + 0.08 * Math.sin(time * 1.8 + i) : -20, flower.z);
     }
     for (const mesh of [blossoms, hearts, stems]) mesh.instanceMatrix.needsUpdate = true;
     highlights.needsUpdate = true;
   }
 
-  function drawFlight(flight, time, dt, total, next, active) {
-    const y = Math.max(waterHeight + 0.3, terrain(flight.x, flight.z)) + flight.height;
+  function drawFlight(flight, time, dt, total, destination, active) {
+    const y = flightSurface(flight.x, flight.z) + flight.height;
     const forwardX = Math.sin(flight.heading), forwardZ = -Math.cos(flight.heading);
     if (active) path.add(flight.x, y, flight.z);
     dummy.position.set(flight.x, y + Math.sin(time * 2.9) * 0.066, flight.z);
@@ -519,17 +531,18 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     petals.instanceMatrix.needsUpdate = true;
     wake.value.set(flight.x, active ? 1 : 0, flight.z);
 
-    const glade = meadow.glades[next];
-    const wx = glade ? glade.x - flight.x : forwardX * 10;
-    const wz = glade ? glade.z - flight.z : forwardZ * 10;
+    const wx = destination ? destination.x - flight.x : forwardX * 10;
+    const wz = destination ? destination.z - flight.z : forwardZ * 10;
     const distance = Math.hypot(wx, wz) || 1;
     for (let i = 0; i < 36; i++) {
-      const flow = ((time * 0.19 + i * 0.618) % 1) * (active ? 14 : 22) + 1.0;
+      const flow = ((time * 0.19 + i * 0.618) % 1) * (active ? Math.min(distance, 14) : 22) + 1.0;
       const lateral = Math.sin(i * 12.17 + time * 0.47) * (1.3 + flow * 0.15);
       const x = flight.x + wx / distance * flow + wz / distance * lateral;
       const z = flight.z + wz / distance * flow - wx / distance * lateral;
       windPoints[i * 3] = x;
-      windPoints[i * 3 + 1] = Math.max(terrain(x, z), waterHeight) + 1.05 + Math.sin(i * 3.8 + time * 1.18) * 0.44;
+      const low = Math.max(terrain(x, z), waterHeight) + 1.05;
+      const height = destination?.y === undefined ? low : THREE.MathUtils.lerp(y, destination.y, Math.min(1, flow / distance));
+      windPoints[i * 3 + 1] = Math.max(low, height) + Math.sin(i * 3.8 + time * 1.18) * 0.44;
       windPoints[i * 3 + 2] = z;
     }
     winds.attributes.position.needsUpdate = true;
@@ -540,10 +553,11 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
       const cx = flight.x - forwardX * trailing;
       const cz = flight.z - forwardZ * trailing;
       target.set(cx, Math.max(y + 1.56 + overview * 2.35, terrain(cx, cz) + 2.35), cz);
-      eye.lerp(target, 1 - Math.exp(-5.2 * dt));
+      eye.lerp(target, reposition ? 1 : 1 - Math.exp(-5.2 * dt));
       target.set(flight.x + forwardX * 11, y - 0.25 - overview * 7.1 + flight.rise * 1.6,
         flight.z + forwardZ * 11);
-      look.lerp(target, 1 - Math.exp(-4.8 * dt));
+      look.lerp(target, reposition ? 1 : 1 - Math.exp(-4.8 * dt));
+      reposition = false;
     } else {
       const sway = reduced ? 0 : Math.sin(time * 0.19);
       eye.set(7.45 + sway * 0.31, 4.85 + sway * 0.14, 13.75);
@@ -554,13 +568,39 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
     if (!reduced && active) camera.rotateZ(flight.steer * -0.027);
   }
 
+  function reset(nextJourney) {
+    journey = nextJourney;
+    path = new FlightPath();
+    pulse.value.z = -20;
+    lightStage = 0;
+    reposition = true;
+    const { level, meadow } = journey;
+    levelFog.setHex(level.haze);
+    skyTint.value.setHex(level.sky);
+    sunlight.color.setHex(level.light);
+    flowers.recolor(meadow.flowers);
+    const patches = grass.mesh.material.uniforms.patches.value;
+    meadow.glades.forEach((glade, i) => patches[i].set(glade.x, glade.z));
+    rings.forEach((mesh, i) => {
+      const ring = journey.rings[i];
+      mesh.visible = false;
+      if (!ring) return;
+      mesh.position.set(ring.x, ring.y, ring.z);
+      mesh.scale.setScalar(ring.radius);
+      mesh.rotation.y = ring.heading;
+      mesh.material.color.setHex(level.ringColor);
+    });
+  }
+
+  reset(journey);
   return {
-    draw(flight, time, dt, total, next, active) {
+    draw(flight, time, dt, total, destination, progress, active) {
       resize();
       clock.value = time;
-      lightStage = smooth(lightStage, meadow.glades.filter(glade => glade.lit).length / 3, dt, 0.32);
+      const { meadow } = journey;
+      lightStage = smooth(lightStage, progress, dt, 0.32);
       warmth.value = lightStage;
-      haze.value.copy(fogColor).lerp(warmFog, lightStage * 0.75);
+      haze.value.copy(levelFog).lerp(warmFog, lightStage * 0.36);
       scene.fog.color.copy(haze.value);
       sunlight.intensity = 2.05 + lightStage * 0.42;
       for (let i = 0; i < meadow.glades.length; i++) {
@@ -568,8 +608,19 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
         glade.glow = smooth(glade.glow, glade.lit ? 1 : 0, dt, 0.76);
         grass.glow.value[i] = glade.glow;
       }
-      drawFlowers(time, next);
-      drawFlight(flight, time, dt, total, next, active);
+      marker.visible = active && destination?.glade !== undefined;
+      if (marker.visible) {
+        marker.position.set(destination.x, terrain(destination.x, destination.z) + 1.55, destination.z);
+        marker.scale.setScalar(1.3 + (reduced ? 0 : Math.sin(time * 2.1) * 0.14));
+        marker.material.color.setHex(destination.color);
+      }
+      const ring = active && nextRing(journey);
+      rings.forEach((mesh, i) => {
+        mesh.visible = Boolean(ring && i >= journey.passed && i <= journey.passed + 1 && journey.rings[i]);
+        if (mesh.visible) mesh.material.opacity = i === journey.passed ? 0.86 : 0.24;
+      });
+      drawFlowers(time, destination);
+      drawFlight(flight, time, dt, total, destination, active);
       renderer.render(scene, camera);
     },
     bloom(total, flower, time) {
@@ -584,9 +635,6 @@ export function createMeadowView(canvas, meadow, mobile, reduced) {
       }
       petals.instanceColor.needsUpdate = true;
     },
-    reset() {
-      path = new FlightPath();
-      pulse.value.z = -20;
-    },
+    reset,
   };
 }

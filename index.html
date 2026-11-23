@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#273930">
-  <meta name="description" content="Drift through a tidal meadow and bring an original chamber score to life.">
+  <meta name="description" content="Fly six quiet routes through a tidal meadow and bring an original chamber score to life.">
   <title>Salt Meadow</title>
   <style>/*__STYLE__*/</style>
 </head>
@@ -14,8 +14,9 @@
     <section id="title-screen" aria-labelledby="title">
       <div class="introduction">
         <h1 id="title">Salt Meadow</h1>
-        <p>A quiet flight through flowers and tidewater.</p>
+        <p>Six quiet flights through flowers and tidewater.</p>
         <button id="begin" class="primary" type="button" disabled>Begin drifting</button>
+        <button id="level-map" class="quiet" type="button" disabled>Flight map</button>
         <p id="start-error" role="alert" hidden></p>
       </div>
     </section>
@@ -24,20 +25,41 @@
       <button id="reset-tilt" class="quiet" type="button" hidden>Reset tilt</button>
       <button id="pause" class="quiet" type="button">Pause</button>
     </div>
+    <section id="objective" class="objective" aria-labelledby="level-name" hidden>
+      <div id="bearing" class="bearing" aria-hidden="true"><span></span></div>
+      <div>
+        <h2 id="level-name"></h2>
+        <p id="level-goal"></p>
+        <p id="level-progress" role="status"></p>
+      </div>
+    </section>
     <div class="flight-messages">
+      <section id="level-clear" class="level-clear" aria-labelledby="clear-message" hidden>
+        <p id="clear-message" role="status"></p>
+        <div class="clear-actions">
+          <button id="next-level" class="primary" type="button"></button>
+          <button id="stay" class="quiet" type="button">Keep drifting</button>
+        </div>
+      </section>
       <p id="hint" class="hint" role="status" hidden></p>
-      <p id="milestone" class="milestone" role="status" hidden></p>
     </div>
     <dialog id="paused" aria-labelledby="pause-title">
       <h2 id="pause-title">A moment of stillness</h2>
       <p id="pause-help">Move the mouse from the centre to steer. Hold to send a gust.</p>
       <div class="pause-actions">
         <button id="resume" class="primary" type="button" autofocus>Resume</button>
-        <button id="restart" class="quiet" type="button">Drift again</button>
+        <button id="restart" class="quiet" type="button">Restart flight</button>
+        <button id="pause-map" class="quiet" type="button">Flight map</button>
         <button id="change-input" class="quiet" type="button" hidden>Switch to touch</button>
         <button id="recenter" class="quiet" type="button" hidden>Reset tilt</button>
       </div>
       <p id="input-help" role="status" hidden></p>
+    </dialog>
+    <dialog id="flight-map" class="flight-map" aria-labelledby="map-title">
+      <h2 id="map-title">Flight map</h2>
+      <p>Finish a flight to open the next. Replay any open flight.</p>
+      <ol id="level-list"></ol>
+      <button id="close-map" class="quiet" type="button">Back</button>
     </dialog>
     <noscript>Enable JavaScript to enter Salt Meadow.</noscript>
   </main>
