@@ -11,7 +11,7 @@ export const levels = [
     landscape: landscapes.meadow,
     goal: 'Wake the shallows, cross the western meadow, and bring color back to the coast.',
     finish: 'Morning has reached both sides of the meadow.',
-    haze: 0x94b4b8, sky: 0x518caf, light: 0xffdb9b, ringColor: 0xffebba,
+    haze: 0x83a6b8, sky: 0x468aba, light: 0xffd299, ringColor: 0xffebba,
     legs: [
       blooms('The shallows', 'Wake nine flowers close to the grass.', bed('Blooms', 0, 9)),
       wind('Over the low hills', 'Follow the wind west, then turn back toward the tidal flats.',

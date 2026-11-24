@@ -79,11 +79,11 @@ export const landscapes = {
       return rolling + mound(x, z, -33, -38, 17, 26, 3.9) + mound(x, z, -47, -95, 19, 29, 4.7)
         + mound(x, z, 48, -66, 16, 31, 3.4) - 2.7 * inlet(channel(x, z)) - shore(x, z);
     },
-    soil: [0x2c4930, 0x668d3e, 0xa68b45, 0x9e835d],
-    plants: [0x335e2f, 0xadc052, 1, 1.08, 0.82],
-    seedColor: 0xc6a052,
-    stone: [0x8b8c76, 0.63, 0.60, 1.15],
-    water: [0x1c4a65, 0x4ba6a0],
+    soil: [0x1c442e, 0x55933a, 0xb49849, 0xac8e5f],
+    plants: [0x246a35, 0x95c34a, 1, 1.08, 0.82],
+    seedColor: 0xd5aa4c,
+    stone: [0x8c8069, 0.63, 0.60, 1.15],
+    water: [0x11556c, 0x2c9f89],
     atmosphere: [0.0052, 0.35, 1, 0.54, 0.22],
     clouds: [1.25, 1.45, 0.69, 0.24],
     hills: [[-91, -121, 49, 37, 20, -0.36], [-68, -149, 54, 28, 21, 0.14],

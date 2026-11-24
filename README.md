@@ -15,7 +15,7 @@ Passing a bud opens the flower, lifts colored petals into your trail, and plays 
 
 As you make progress through a flight, more instruments join the chamber score and the light warms.
 
-In First Light you can skim the fescue under the pines, follow the tidewater past cattails and sandstone shelves, or climb to see the creek bend below a broken dawn sky. The grass bends as you pass. Petals lift from the flowers, fan out through turns, and settle as you glide.
+In First Light you can skim the green fescue under the pines, follow the creek from clear shallows into deep teal water, or climb to see its bends below a broken dawn sky. The grass bends as you pass. Petals lift from the flowers, fan out through turns, and settle as you glide.
 
 ![A petal trail over the First Light estuary](screenshots/flight.jpg)
 

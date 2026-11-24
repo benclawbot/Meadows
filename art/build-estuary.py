@@ -467,9 +467,20 @@ sun_data.angle = m.radians(5)
 sun = bpy.data.objects.new("Sun over the estuary", sun_data)
 studio.objects.link(sun)
 sun.rotation_euler = Vector((-.56, -.82, -.38)).to_track_quat("-Z", "Y").to_euler()
-water = material("Estuary • clear blue water", (.027, .177, .23), .24)
-shader = water.node_tree.nodes.get("Principled BSDF")
-shader.inputs["Metallic"].default_value = .22
+water = material("Estuary • teal tidal water", (.027, .245, .22), .17)
+water_nodes, water_links = water.node_tree.nodes, water.node_tree.links
+shader = water_nodes.get("Principled BSDF")
+shader.inputs["IOR"].default_value = 1.333
+shader.inputs["Transmission Weight"].default_value = .72
+position = water_nodes.new("ShaderNodeNewGeometry")
+ripples = water_nodes.new("ShaderNodeTexNoise")
+ripples.inputs["Scale"].default_value = 3.7
+bump = water_nodes.new("ShaderNodeBump")
+bump.inputs["Distance"].default_value = .045
+bump.inputs["Strength"].default_value = .19
+water_links.new(position.outputs["Position"], ripples.inputs["Vector"])
+water_links.new(ripples.outputs["Fac"], bump.inputs["Height"])
+water_links.new(bump.outputs["Normal"], shader.inputs["Normal"])
 object_mesh("Tidewater", [(-450, -320, -.57), (450, -320, -.57), (450, 670, -.57), (-450, 670, -.57)],
             [(0, 1, 2, 3)], water, land)
 

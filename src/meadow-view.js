@@ -91,9 +91,9 @@ function makeSky(clock, warmth, haze, skyTint, light, night, air, clouds, skyUni
         color = mix(color,haze*.66,rain*.33);
         if (authoredSky > .5) {
           vec3 outlook = estuarySkyAt(dir);
-          outlook *= mix(vec3(.76,.93,1.20), vec3(1.22,1.01,.75), pow(towardSun,5.));
-          color = mix(color, outlook, .82);
-          color += vec3(.46,.31,.16) * pow(towardSun,32.) * .47;
+          outlook *= mix(vec3(.56,.88,1.22), vec3(1.23,.99,.71), pow(towardSun,9.));
+          color = mix(color, outlook, .92);
+          color += vec3(.27,.13,.05) * pow(towardSun,26.) * .38;
           color += vec3(1.34,.87,.48) * smoothstep(.99987,.99992,towardSun);
         }
         color = mix(haze, color, smoothstep(-.115,.047,dir.y));
@@ -169,7 +169,8 @@ function makeGround(mobile, landscape, wakeUniforms, sculpt) {
         vec3 groundPhoto = texture2D(map,vMapUv).rgb;
         float grit = dot(groundPhoto,vec3(.2126,.7152,.0722));
         diffuseColor.rgb *= .54 + grit*2.4;
-        diffuseColor.rgb *= mix(vec3(1.),vec3(1.20,1.03,.82),land.w*.56);
+        diffuseColor.rgb *= mix(vec3(1.),vec3(1.32,1.04,.75),land.w*.65);
+        diffuseColor.rgb *= mix(vec3(.57,.65,.61),vec3(1.),smoothstep(-.57,.08,land.y));
       `);
     }
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
@@ -200,7 +201,8 @@ function makeGround(mobile, landscape, wakeUniforms, sculpt) {
 
 function makeWater(clock, warmth, haze, light, night, air, landscape, skyUniforms) {
   const [deep, shallows] = landscape.water.map(hex => new THREE.Color(hex));
-  const width = 192, height = 208;
+  const estuary = landscape.name === 'meadow';
+  const width = estuary ? 384 : 192, height = estuary ? 416 : 208;
   const area = new THREE.Vector4(-106, -172, 212, 214);
   const bed = new Uint8Array(width * height);
   for (let row = 0; row < height; row++) {
@@ -249,21 +251,44 @@ function makeWater(clock, warmth, haze, light, night, air, landscape, skyUniform
         vec3 reflected = mix(shallows, haze, warmth*.25+.12);
         vec3 color = mix(mix(shallows*.68,deep,smoothstep(.04,.65,depth)), reflected, .10+.75*f);
         if (authoredSky > .5) {
-          vec3 skyMirror = estuarySkyAt(reflect(-eye,n));
-          float sandTexture = fbm(p*2.58);
-          vec3 bedColor = mix(vec3(.11,.15,.067),vec3(.33,.29,.131),sandTexture);
-          bedColor += vec3(.05,.078,.037) * pow(max(0.,sin(a+b*1.17)),7.);
-          vec3 transmitted = mix(
-            mix(bedColor,shallows,smoothstep(0.,.21,depth)), deep, smoothstep(.15,.79,depth));
-          color = mix(transmitted,skyMirror, .08+.76*pow(1.-abs(eye.y),4.));
+          float detail = 1.-smoothstep(.10,.60,length(fwidth(p)));
+          float gust = noise(p*.31+vec2(.04,-.08)*waveTime);
+          float chop = sin(dot(p,vec2(2.1,6.9))-waveTime*2.05+ripple*2.6+gust*2.4);
+          float crossChop = cos(dot(p,vec2(-5.8,3.1))-waveTime*1.47-ripple*1.4+gust*3.3);
+          vec3 rippledNormal = normalize(vec3(n.x*.55,n.y,n.z*.55)
+            + vec3(.020*chop-.031*crossChop,0.,.032*chop+.012*crossChop)*detail*(.53+.76*gust));
+          float facing = clamp(dot(eye,rippledNormal),0.,1.);
+          vec2 through = p + rippledNormal.xz * (1. + depth*3.5);
+          float grit = noise(through*4.7)*.65+noise(through*12.)*.35;
+          float sunlightRibs = pow(max(0.,sin(6.1*a + sin(3.5*b)*1.9)),8.)*detail;
+          vec3 bedColor = mix(vec3(.13,.119,.065),vec3(.37,.27,.127),grit);
+          bedColor *= .88 + .45*sunlightRibs;
+          vec3 body = mix(shallows,deep,smoothstep(.09,.76,depth));
+          vec3 absorb = exp(-depth*(7. + 3.*(1.-facing))*vec3(1.59,.98,.82));
+          vec3 transmitted = mix(body,bedColor,absorb);
+          vec3 reflectedRay = reflect(-eye,rippledNormal);
+          vec3 mirror = estuarySkyAt(reflectedRay)*vec3(.37,.62,.72);
+          // Use the bathymetry to dim sky reflections that meet the bank.
+          vec2 towardBank = reflectedRay.xz/reliefBounds.zw;
+          float reflectedDepth = texture2D(depthMap,bedUV+towardBank*2.4).r;
+          float bank = (1.-smoothstep(.006,.08,reflectedDepth)) * smoothstep(.025,.075,min(border.x,border.y));
+          bank *= 1.-smoothstep(.045,.35,reflectedRay.y);
+          mirror *= mix(vec3(1.),vec3(.42,.63,.49),bank*.75);
+          float fresnel = .04+.53*pow(1.-facing,4.2);
+          color = mix(transmitted,mirror,fresnel);
+          float reflection = max(dot(reflect(-light,rippledNormal),eye),0.);
+          float gleam = pow(reflection,mix(116.,260.,detail));
+          color += vec3(.92,.65,.35)*(gleam*.47+pow(reflection,44.)*.068)*(.58+.42*gust);
+          color *= .94+.10*foil+.07*chop*detail;
+        } else {
+          float reflection = max(dot(reflect(-light,n),eye),0.);
+          float glimmer = max(0., sin(a*1.42+sin(b*1.34)*1.8));
+          float gloss = pow(reflection, mix(110.,152.,night));
+          color += mix(vec3(.88,.72,.49),vec3(.40,.62,1.02),night)
+            * (gloss * 0.77 + pow(reflection,24.) * .16) * (0.38 + .62 * glimmer);
+          color += mix(vec3(.031,.049,.049),vec3(.004,.009,.02),night)
+            * pow(glimmer,5.) * (.25+.75*noise(p*.43));
         }
-        float reflection = max(dot(reflect(-light,n),eye),0.);
-        float gloss = pow(reflection, mix(110.,152.,night));
-        float glimmer = max(0., sin(a*1.42+sin(b*1.34)*1.8));
-        color += mix(vec3(.88,.72,.49),vec3(.40,.62,1.02),night)
-          * (gloss * 0.77 + pow(reflection,24.) * .16) * (0.38 + .62 * glimmer);
-        color += mix(vec3(.031,.049,.049),vec3(.004,.009,.02),night)
-          * pow(glimmer,5.) * (.25+.75*noise(p*.43));
         float foam = smoothstep(.42,.90, sin(depth*36. + foil*2.2 + waveTime*.77) * .60 + noise(p*2.6)*.62);
         foam *= (1.-smoothstep(.04,.25,depth)) * smoothstep(.005,.035,depth) * swell;
         color = mix(color, mix(vec3(.71,.78,.72),vec3(.084,.16,.27),night),foam*.53);
@@ -369,6 +394,7 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
     uniforms: {
       clock, warmth, haze, night, pulse, glow, air, ...wakeUniforms,
       range: { value: fescue ? range : 250 },
+      coastalFescue: { value: fescue ? 1 : 0 },
       baseTint: { value: new THREE.Color(base) }, tipTint: { value: new THREE.Color(tips) },
       seedTint: { value: new THREE.Color(landscape.seedColor) },
       patches: { value: glades.map(glade => new THREE.Vector2(glade.x, glade.z)) },
@@ -405,7 +431,7 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
       }
     `,
     fragmentShader: `
-      uniform float clock, warmth, night, glow[3];
+      uniform float clock, warmth, night, coastalFescue, glow[3];
       uniform vec3 haze, pulse, baseTint, tipTint, seedTint;
       uniform vec4 air;
       uniform vec2 patches[3];
@@ -420,6 +446,7 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
         tip = mix(tip,tipTint*.88 + vec3(.09,.08,.03),plant.z*.61);
         vec3 color = mix(base,tip,smoothstep(0.,.96,plant.x));
         color *= .79 + .26 * plant.y + .11*plant.w;
+        color *= mix(vec3(1.),mix(vec3(.72,.97,1.04),vec3(1.38,1.04,.62),plant.y),coastalFescue);
         color = mix(color,seedTint*(.87 + plant.y*.17),smoothstep(1.,1.65,surface.x)*.88);
         color *= 1. - surface.y*.18*(1. - plant.x*.63);
         color += tipTint*.26*surface.y*smoothstep(.37,1.,plant.x);
