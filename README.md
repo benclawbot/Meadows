@@ -15,7 +15,7 @@ Passing a bud opens the flower, lifts colored petals into your trail, and plays 
 
 As you make progress through a flight, more instruments join the chamber score and the light warms.
 
-In First Light you can skim the green fescue under the pines, follow the creek from clear shallows into deep teal water, or climb to see its bends below a broken dawn sky. The grass bends as you pass. Petals lift from the flowers, fan out through turns, and settle as you glide.
+In First Light you can skim the fescue under the pines, follow the creek from pebble shallows into open water, or climb to see the wooded ridges. The water uses a ripple texture baked in Blender and reflects the banks and sky as you fly. The grass bends as you pass. Petals lift from the flowers, fan out through turns, and settle as you glide.
 
 ![A petal trail over the First Light estuary](screenshots/flight.jpg)
 
@@ -51,13 +51,14 @@ npm run preview
 
 The build writes a self-contained `dist/index.html`. You can open it directly on desktop or serve it over HTTPS for phone tilt. The local preview listens on loopback.
 
-The editable [First Light scene](art/First-Light.blend) has the sculpted terrain, vegetation and packed materials. The browser build uses Blender’s exported meshes, height grid and sky panorama. Blender is needed only for editing or re-exporting the scene.
+The editable scene contains the sculpted terrain, vegetation, packed photographs, shallow-water simulation and sky. The browser build uses the exported meshes, height grid, ripple texture, and sky panorama. [First Light Blender scene](art/First-Light.blend)
 
 ### Credits
 
 The setting, game, and composition are original to Salt Meadow.
 
 - [Three.js](https://github.com/mrdoob/three.js) is MIT-licensed.
-- First Light uses [Poly Haven’s CC0](https://polyhaven.com/license) [coastal dusk](https://polyhaven.com/a/qwantani_sunset_puresky) and [broken-cloud](https://polyhaven.com/a/kloofendal_38d_partly_cloudy_puresky) panoramas, with [turf](https://polyhaven.com/a/aerial_grass_rock) and [stone](https://polyhaven.com/a/coast_land_rocks_01) surface textures.
+- The sky combines two CC0 panoramas from Poly Haven. [Coastal dusk](https://polyhaven.com/a/qwantani_sunset_puresky), [broken cloud](https://polyhaven.com/a/kloofendal_38d_partly_cloudy_puresky)
+- Photographed surface textures come from Poly Haven’s CC0 library. [Turf](https://polyhaven.com/a/leafy_grass), [grass blades](https://polyhaven.com/a/grass_medium_01), [pine bark](https://polyhaven.com/a/bark_brown_02), [sandstone](https://polyhaven.com/a/coast_land_rocks_01), [coastal sand](https://polyhaven.com/a/coast_sand_02), [river pebbles](https://polyhaven.com/a/river_small_rocks), [CC0 license](https://polyhaven.com/license)
 - Upright piano, cello, flute, and harp recordings are from [Versilian Studios VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE/tree/440300901dfe9275fd84e0b7763af1f8443ae62e), released under CC0. Simon Dalzell of Ivy Audio recorded the upright piano.
 - [Cormorant Garamond](https://github.com/CatharsisFonts/Cormorant) is by Christian Thalmann and is distributed under the SIL Open Font License in `samples/OFL.txt`.

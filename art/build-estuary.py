@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import bpy
+import numpy as np
 from mathutils import Vector, noise
 
 
@@ -50,7 +51,7 @@ def material(name, color, roughness=.86, vertex=False):
     return mat
 
 
-def image(name, size=None, data=False):
+def image(name, size=None, data=False, output_name=None):
     path = args.references / name
     texture = bpy.data.images.load(str(path), check_existing=True)
     if data:
@@ -58,8 +59,8 @@ def image(name, size=None, data=False):
     if size:
         texture.scale(size, size)
         texture.file_format = "JPEG"
-        texture.save(filepath=str(args.out / ("packed-" + name)), quality=89)
-        texture.filepath_raw = str(args.out / ("packed-" + name))
+        texture.filepath_raw = str(args.out / (output_name or ("packed-" + name)))
+        texture.save(quality=90)
         texture.pack()
     return texture
 
@@ -80,11 +81,54 @@ def surface(name, diffuse, normal, normal_strength):
     return mat
 
 
-soil = surface("Wet turf and grit", "meadow-albedo-source.jpg", "meadow-normal-source.jpg", .45)
+def save_texture(name, pixels, data=False):
+    height, width, _ = pixels.shape
+    texture = bpy.data.images.new(name, width, height, alpha=False, is_data=data)
+    texture.pixels.foreach_set(pixels.astype(np.float32).ravel())
+    texture.file_format = "PNG" if name.endswith(".png") else "JPEG"
+    texture.filepath_raw = str(args.out / name)
+    texture.save(quality=92)
+    texture.pack()
+    return texture
+
+
+def image_pixels(texture):
+    width, height = texture.size
+    pixels = np.empty(width * height * 4, dtype=np.float32)
+    texture.pixels.foreach_get(pixels)
+    return pixels.reshape(height, width, 4)
+
+
+soil = surface("Photographed meadow turf", "turf-photo.jpg", "turf-normal.jpg", .52)
 stone = surface("Eroded coastal sandstone", "stone-albedo-source.jpg", "stone-normal-source.jpg", .77)
 leaves = material("Meadow leaf and reed tint", (.17, .25, .07), vertex=True)
 pine = material("Salt-stunted pine • bark and needles", (.14, .11, .04), vertex=True)
 corolla = material("Petal tissue", (.81, .55, .21), .58)
+riverbed = image("riverbed-photo.jpg", 768, output_name="riverbed.jpg")
+shore_sand = image("wet-sand-photo.jpg", 768, output_name="shore-sand.jpg")
+
+leaf_photo = image_pixels(image("leaf-photo.jpg"))
+blade_photo = save_texture("blade.jpg", leaf_photo[548:765, 841:854].copy())
+bark_photo = image_pixels(image("bark-photo.jpg", 512))
+bark = np.ones((512, 576, 4), dtype=np.float32)
+bark[:, :512] = bark_photo
+bark_atlas = save_texture("pine-bark.jpg", bark)
+bark_relief = np.full((512, 576, 4), (.5, .5, 1, 1), dtype=np.float32)
+bark_relief[:, :512] = image_pixels(image("bark-normal.jpg", 512, data=True))
+bark_normal = save_texture("pine-normal.jpg", bark_relief, data=True)
+
+
+def mix_photograph(mat, photograph):
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    shader = nodes.get("Principled BSDF")
+    tex = nodes.new("ShaderNodeTexImage")
+    tex.image = photograph
+    multiply = nodes.new("ShaderNodeMixRGB")
+    multiply.blend_type = "MULTIPLY"
+    multiply.inputs[0].default_value = 1
+    links.new(shader.inputs["Base Color"].links[0].from_socket, multiply.inputs[1])
+    links.new(tex.outputs["Color"], multiply.inputs[2])
+    links.new(multiply.outputs["Color"], shader.inputs["Base Color"])
 
 
 def object_mesh(name, vertices, faces, mat, parent_collection, colors=None, uvs=None):
@@ -126,7 +170,7 @@ def add_tube(vertices, faces, colors, points, radii, sides, base):
     faces.append(tuple(first + (len(points) - 1) * sides + k for k in range(sides)))
 
 
-def blade(vertices, faces, colors, root, angle, height, width, bow, color):
+def blade(vertices, faces, colors, root, angle, height, width, bow, color, uvs=None):
     start = len(vertices)
     across = Vector((m.cos(angle), m.sin(angle), 0))
     forward = Vector((-m.sin(angle), m.cos(angle), 0))
@@ -138,17 +182,19 @@ def blade(vertices, faces, colors, root, angle, height, width, bow, color):
             shade = .59 + t * .55 + sign * .045
             vertices.append(center + across * (sign * width * taper))
             colors.append(tuple(c * shade for c in color))
+            if uvs is not None:
+                uvs.append((.5 + sign * .43, t))
     for index in range(start, start + 8, 2):
         faces.append((index, index + 1, index + 3, index + 2))
 
 
 def grass():
-    vertices, faces, colors = [], [], []
+    vertices, faces, colors, uvs = [], [], [], []
     for i in range(7):
         angle = i * 2.39996 + rng.uniform(-.24, .24)
         root = (rng.uniform(-.105, .105), rng.uniform(-.11, .11), 0)
         blade(vertices, faces, colors, root, angle, rng.uniform(.47, 1.13),
-              rng.uniform(.023, .037), rng.uniform(.14, .53), (rng.uniform(.065, .13), .29, .035))
+              rng.uniform(.023, .037), rng.uniform(.14, .53), (rng.uniform(.065, .13), .29, .035), uvs)
     for i in range(2):
         start = len(vertices)
         x, y = rng.uniform(-.15, .16), rng.uniform(-.14, .14)
@@ -157,9 +203,10 @@ def grass():
             for sign in (-1, 1):
                 vertices.append((x + sign * w + t * t * .18, y + t * t * .21, height * t))
                 colors.append((.52, .28, .057) if t > .7 else (.055, .23, .024))
+                uvs.append((.5 + sign * .43, t))
         for j in range(start, start + 6, 2):
             faces.append((j, j + 1, j + 3, j + 2))
-    return object_mesh("FescueTuft", vertices, faces, leaves, kit, colors)
+    return object_mesh("FescueTuft", vertices, faces, leaves, kit, colors, uvs)
 
 
 def reed():
@@ -180,7 +227,7 @@ def reed():
 
 
 def weathered_rock(name, profile):
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=4, radius=1)
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=5, radius=1)
     obj = bpy.context.object
     for parent in list(obj.users_collection):
         parent.objects.unlink(obj)
@@ -212,7 +259,7 @@ def wind_pine(name, lean):
     trunk = [(0, 0, -.12), (-.08, .04, 1.06), (.12, .10, 2.15),
              (.48 * lean, .12, 3.24), (1.04 * lean, -.14, 4.20),
              (1.72 * lean, -.25, 5.14), (2.37 * lean, -.31, 5.70)]
-    add_tube(vertices, faces, colors, trunk, (.35, .27, .218, .152, .102, .065, .014), 10, (.14, .072, .031))
+    add_tube(vertices, faces, colors, trunk, (.35, .27, .218, .152, .102, .065, .014), 10, (.66, .47, .34))
     for j in range(21):
         i = 1 + j % 5
         root = Vector(trunk[i]).lerp(Vector(trunk[i + 1]), rng.uniform(.09, .87))
@@ -221,12 +268,12 @@ def wind_pine(name, lean):
         reach = (4.75 - root.z * .48) * rng.uniform(.44, .94)
         tip = root + direction * reach + Vector((lean * .87, -.02, .39))
         fork = root.lerp(tip, .55) + Vector((-.17 * lean, .03, -.14))
-        add_tube(vertices, faces, colors, (root, fork, tip), (.083, .048, .005), 6, (.15, .074, .029))
+        add_tube(vertices, faces, colors, (root, fork, tip), (.083, .048, .005), 6, (.64, .43, .28))
         for k in range(8):
             start = fork.lerp(tip, (k + 1) / 9)
             end = start + Vector((lean * .35 + rng.uniform(-.28, .42), rng.uniform(-.68, .68),
                                   rng.uniform(.06, .59)))
-            add_tube(vertices, faces, colors, (start, end), (.025, .004), 4, (.10, .062, .023))
+            add_tube(vertices, faces, colors, (start, end), (.025, .004), 4, (.56, .39, .25))
             for _ in range(17):
                 center = start.lerp(end, rng.uniform(.15, 1))
                 spread = Vector((rng.uniform(-.31, .43), rng.uniform(-.40, .40), rng.uniform(-.13, .28)))
@@ -238,7 +285,9 @@ def wind_pine(name, lean):
                 colors.extend(((.026*shade, .082*shade, .015*shade), (.033*shade, .112*shade, .021*shade),
                                (.065*shade, .19*shade, .037*shade)))
                 faces.append((a, a + 1, a + 2))
-    return object_mesh(name, vertices, faces, pine, kit, colors)
+    uvs = [(0.96, .5) if green > red else (.02 + ((point[0]*.73 + point[1]*.48) % 1) * .83, point[2]*1.3)
+           for point, (red, green, _) in zip(vertices, colors)]
+    return object_mesh(name, vertices, faces, pine, kit, colors, uvs)
 
 
 def petal():
@@ -327,6 +376,20 @@ for index, (x, z, scale, yaw) in enumerate([
     (-38, -95, 1.16, .4), (-45, -102, .88, -.9), (-48, -112, 1.2, .9),
 ]):
     game_objects.append(linked(f"EstuaryPine_{index:02}", pine_a if index % 3 else pine_b, x, z, (scale,)*3, yaw, .18))
+
+for i, z0 in enumerate(range(-195, 50, 16)):
+    for j, x0 in enumerate(range(-135, 131, 17)):
+        x, z = x0 + rng.uniform(-5.5, 5.5), z0 + rng.uniform(-5.5, 5.5)
+        y = elevation(x, z)
+        grade = m.hypot(elevation(x+1, z)-y, elevation(x, z+1)-y)
+        if y < .42 or grade > .92 or rng.random() < .57:
+            continue
+        if any((x-cx)**2+(z-cz)**2 < radius**2 for cx, cz, radius in seed["clearings"]):
+            continue
+        scale = rng.uniform(.51, 1.26)
+        yaw = rng.uniform(-m.pi, m.pi)
+        game_objects.append(linked(f"EstuaryPineScatter_{i:02}_{j:02}", pine_a if (i+j)%2 else pine_b,
+                                   x, z, (scale, scale, scale*rng.uniform(.9, 1.13)), yaw, .15))
 for index, (x, z, size, height, width, yaw) in enumerate([
     (5.7, 1, 1.35, .71, .86, .3), (-5.6, -6.8, 1.29, .78, 1.28, -.7),
     (-10.7, -19, 2.72, 1.51, 1.52, .24), (-15.3, -23, 2.82, 1.72, 1.82, .57),
@@ -339,8 +402,8 @@ for index, (x, z, size, height, width, yaw) in enumerate([
 ]):
     game_objects.append(linked(f"EstuaryLedge_{index:02}", shelf if index % 3 else block,
                                x, z, (size, width, height), yaw, .10))
-for index in range(155):
-    z = rng.uniform(-123, 10)
+for index in range(227):
+    z = rng.uniform(-158, 29)
     center = 23 + 16*m.sin((z+11)*.041) - .108*z
     width = 2.6 + 2.4*(1+m.sin(z*.042+.8)) + 9*max(0,(-z-66)/130)
     x = center + rng.choice((-1, 1)) * width * rng.uniform(.82, 1.60)
@@ -355,6 +418,40 @@ for obj in game_objects:
 bpy.context.view_layer.objects.active = terrain
 bpy.ops.export_scene.gltf(filepath=str(args.out / "first-light.glb"), export_format="GLB",
                           use_selection=True, export_image_format="JPEG", export_image_quality=89)
+mix_photograph(pine, bark_atlas)
+pine_nodes, pine_links = pine.node_tree.nodes, pine.node_tree.links
+bark_texture = pine_nodes.new("ShaderNodeTexImage")
+bark_texture.image = bark_normal
+bark_detail = pine_nodes.new("ShaderNodeNormalMap")
+bark_detail.inputs["Strength"].default_value = .58
+pine_links.new(bark_texture.outputs["Color"], bark_detail.inputs["Color"])
+pine_links.new(bark_detail.outputs["Normal"], pine_nodes.get("Principled BSDF").inputs["Normal"])
+fescue_surface = leaves.copy()
+fescue_surface.name = "Photographed fescue blades"
+mix_photograph(fescue_surface, blade_photo)
+tuft.data.materials[0] = fescue_surface
+
+soil_nodes, soil_links = soil.node_tree.nodes, soil.node_tree.links
+soil_input = soil_nodes.get("Principled BSDF").inputs["Base Color"]
+turf_color = soil_input.links[0].from_socket
+proximity = soil_nodes.new("ShaderNodeMapRange")
+proximity.inputs["From Min"].default_value = -.67
+proximity.inputs["From Max"].default_value = .46
+coordinates = soil_nodes.new("ShaderNodeNewGeometry")
+height_axis = soil_nodes.new("ShaderNodeSeparateXYZ")
+soil_links.new(coordinates.outputs["Position"], height_axis.inputs["Vector"])
+soil_links.new(height_axis.outputs["Z"], proximity.inputs["Value"])
+sediment = soil_nodes.new("ShaderNodeMixRGB")
+sediment.inputs[0].default_value = .52
+for index, photograph in enumerate([riverbed, shore_sand], 1):
+    image_node = soil_nodes.new("ShaderNodeTexImage")
+    image_node.image = photograph
+    soil_links.new(image_node.outputs["Color"], sediment.inputs[index])
+shoreline = soil_nodes.new("ShaderNodeMixRGB")
+soil_links.new(proximity.outputs["Result"], shoreline.inputs[0])
+soil_links.new(sediment.outputs["Color"], shoreline.inputs[1])
+soil_links.new(turf_color, shoreline.inputs[2])
+soil_links.new(shoreline.outputs["Color"], soil_input)
 for obj in game_objects:
     obj.select_set(False)
 for obj in kit.objects:
@@ -364,10 +461,10 @@ for obj in kit.objects:
 
 def scatter_fescue():
     points = []
-    for _ in range(48000):
-        x, z = rng.uniform(-55, 64), rng.uniform(-113, 13)
+    for _ in range(106000):
+        x, z = rng.uniform(xs[0], xs[-1]), rng.uniform(zs[0], zs[-1])
         y = elevation(x, z)
-        if y > -.42:
+        if y > -.42 and m.hypot(elevation(x+.7, z)-y, elevation(x, z+.7)-y) < .88:
             points.append((x, -z, y - .03))
     mesh = bpy.data.meshes.new("Fescue roots")
     mesh.from_pydata(points, [], [])
@@ -457,6 +554,42 @@ def camera(name, where, look_at):
     return obj
 
 
+def bake_tidal_normals():
+    ocean = object_mesh("Tidal ripple source", [(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)],
+                        [(0, 1, 2, 3)], soil, kit)
+    waves = ocean.modifiers.new("Shallow-water spectrum", "OCEAN")
+    waves.spectrum = "TEXEL_MARSEN_ARSLOE"
+    waves.viewport_resolution = waves.resolution = 16
+    waves.spatial_size = 19
+    waves.depth = 2.5
+    waves.wind_velocity = 6.0
+    waves.wave_scale_min = .046
+    waves.wave_alignment = .42
+    waves.choppiness = 0
+    waves.fetch_jonswap = 210
+    waves.time = 3.4
+    waves.random_seed = 8462
+    evaluated = ocean.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    grid = evaluated.to_mesh()
+    coords = np.empty(len(grid.vertices) * 3, dtype=np.float32)
+    grid.vertices.foreach_get("co", coords)
+    evaluated.to_mesh_clear()
+    ocean.hide_render = True
+    ocean.hide_set(True)
+    pts = coords.reshape(-1, 3)
+    side = m.isqrt(len(pts))
+    assert side * side == len(pts) and side >= 65
+    grid = pts[np.lexsort((pts[:, 0], pts[:, 1])), 2].reshape(side, side)[:-1, :-1]
+    slopes = np.stack([(np.roll(grid, 1, axis) - np.roll(grid, -1, axis)) for axis in (1, 0)], axis=-1)
+    extent = np.percentile(np.linalg.norm(slopes, axis=-1), 98)
+    assert extent > 1e-6, "The tidal bake has no measurable slopes"
+    slopes = np.clip(slopes * (.29 / extent), -.58, .58)
+    pixels = np.ones((*grid.shape, 4), dtype=np.float32)
+    pixels[..., :2] = slopes * .5 + .5
+    pixels[..., 2] = np.sqrt(1 - np.sum(slopes ** 2, axis=-1)) * .5 + .5
+    return save_texture("tidal-normals.png", pixels, data=True)
+
+
 lookout = camera("Look into First Light", (7.6, -15.3, 5.6), (1.9, 28, 1.8))
 lookout.data.lens = 32
 lookout.data.clip_end = 850
@@ -467,22 +600,19 @@ sun_data.angle = m.radians(5)
 sun = bpy.data.objects.new("Sun over the estuary", sun_data)
 studio.objects.link(sun)
 sun.rotation_euler = Vector((-.56, -.82, -.38)).to_track_quat("-Z", "Y").to_euler()
-water = material("Estuary • teal tidal water", (.027, .245, .22), .17)
+water = material("Estuary • shallow tidal water", (.018, .135, .123), .11)
 water_nodes, water_links = water.node_tree.nodes, water.node_tree.links
 shader = water_nodes.get("Principled BSDF")
 shader.inputs["IOR"].default_value = 1.333
-shader.inputs["Transmission Weight"].default_value = .72
-position = water_nodes.new("ShaderNodeNewGeometry")
-ripples = water_nodes.new("ShaderNodeTexNoise")
-ripples.inputs["Scale"].default_value = 3.7
-bump = water_nodes.new("ShaderNodeBump")
-bump.inputs["Distance"].default_value = .045
-bump.inputs["Strength"].default_value = .19
-water_links.new(position.outputs["Position"], ripples.inputs["Vector"])
-water_links.new(ripples.outputs["Fac"], bump.inputs["Height"])
-water_links.new(bump.outputs["Normal"], shader.inputs["Normal"])
+shader.inputs["Transmission Weight"].default_value = .92
+ripples = water_nodes.new("ShaderNodeTexImage")
+ripples.image = bake_tidal_normals()
+normal = water_nodes.new("ShaderNodeNormalMap")
+normal.inputs["Strength"].default_value = .58
+water_links.new(ripples.outputs["Color"], normal.inputs["Color"])
+water_links.new(normal.outputs["Normal"], shader.inputs["Normal"])
 object_mesh("Tidewater", [(-450, -320, -.57), (450, -320, -.57), (450, 670, -.57), (-450, 670, -.57)],
-            [(0, 1, 2, 3)], water, land)
+            [(0, 1, 2, 3)], water, land, uvs=[(-75, -54), (75, -54), (75, 112), (-75, 112)])
 
 # Render from a separate scene so the sky texture contains no terrain or vegetation.
 panorama = bpy.data.scenes.new("Sky panorama")

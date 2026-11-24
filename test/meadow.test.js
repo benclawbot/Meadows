@@ -3,6 +3,23 @@ import test from 'node:test';
 import { collectBlooms, driftFromBloom, FlightPath, makeMeadow, nearbyBloomTurn, newFlight, stepFlight, tiltControl } from '../src/flight.js';
 import { MeadowWake } from '../src/meadow-wake.js';
 import { BAR, bloomPitch, MeadowScore, score } from '../src/score.js';
+import { grassTileSize, sampleGrassTile } from '../src/grass-scatter.js';
+import { landscapes, waterHeight } from '../src/landscape.js';
+
+test('grass fills neighboring headland tiles outside the opening meadow and stays above water', () => {
+  const row = -3;
+  for (const column of [-5, -4, 4, 5]) {
+    const sampled = sampleGrassTile(landscapes.meadow, column, row, false, false);
+    assert.ok(sampled.tuft.length > 800);
+    assert.deepEqual(sampleGrassTile(landscapes.meadow, column, row, false, false), sampled);
+    for (let i = 0; i < sampled.tuft.length; i += 4) {
+      const [x, y, z] = sampled.tuft.slice(i, i + 3);
+      assert.ok(x >= column * grassTileSize && x < (column + 1) * grassTileSize);
+      assert.ok(z >= row * grassTileSize && z < (row + 1) * grassTileSize);
+      assert.ok(y > waterHeight);
+    }
+  }
+});
 
 test('phone tilt centres on the holding angle and rotates with the screen', () => {
   const neutral = [37, 11];

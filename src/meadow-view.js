@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { clamp, driftFromBloom, FlightPath, gustStrength, randomFrom, smooth } from './flight.js';
-import { channel, flightSurface, groundBounds, groundCover, outerGroundHeight, sandRipples, terrain, terrainDetail, waterHeight } from './landscape.js';
+import { flightSurface, groundBounds, groundCover, outerGroundHeight, sandRipples, terrain, terrainDetail, waterHeight } from './landscape.js';
 import { makeWeather, weatherByLandscape } from './weather.js';
 import { currentLeg } from './journey.js';
 import { MeadowWake, readWake } from './meadow-wake.js';
 import { estuarySkyGLSL, makeEstuaryLandmarks } from './estuary-art.js';
+import { makeWater } from './tidewater.js';
+import { grassTileSize, sampleGrassTile } from './grass-scatter.js';
 
 const fogColor = new THREE.Color(0xa4b2ab);
 const moon = new THREE.Vector3(-0.32, 0.31, -0.88).normalize();
@@ -109,7 +111,7 @@ function makeSky(clock, warmth, haze, skyTint, light, night, air, clouds, skyUni
   return sky;
 }
 
-function makeGround(mobile, landscape, wakeUniforms, sculpt) {
+function makeGround(mobile, landscape, wakeUniforms, art, sculpt) {
   const { width, depth, centerZ } = groundBounds;
   const surface = sculpt?.geometry.clone() ?? new THREE.PlaneGeometry(width, depth, mobile ? 220 : 288, mobile ? 192 : 248);
   const position = surface.attributes.position;
@@ -125,8 +127,10 @@ function makeGround(mobile, landscape, wakeUniforms, sculpt) {
   if (!sculpt) {
     surface.rotateX(-Math.PI / 2);
     surface.translate(0, 0, centerZ);
+    const uv = surface.attributes.uv;
     for (let i = 0; i < position.count; i++) {
       position.setY(i, terrain(position.getX(i), position.getZ(i), landscape));
+      uv.setXY(i, position.getX(i) / 3.55, -position.getZ(i) / 3.55);
     }
     surface.computeVertexNormals();
   }
@@ -152,27 +156,31 @@ function makeGround(mobile, landscape, wakeUniforms, sculpt) {
   }
   surface.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   surface.setAttribute('exposed', new THREE.BufferAttribute(exposed, 1));
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 });
-  if (sculpt) {
-    material.map = sculpt.material.map;
-    material.normalMap = sculpt.material.normalMap;
-    material.normalScale.set(.39, .39);
-  }
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.89,
+    map: art.ground.material.map, normalMap: art.ground.material.normalMap,
+    normalScale: new THREE.Vector2(.55, .55),
+  });
+  material.customProgramCacheKey = () => `terrain ${landscape.name}`;
   material.onBeforeCompile = shader => {
-    Object.assign(shader.uniforms, wakeUniforms);
+    Object.assign(shader.uniforms, wakeUniforms, { beach: { value: art.sand }, gravel: { value: art.pebbles } });
     shader.vertexShader = 'attribute float exposed; varying vec4 land;\n' + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
       '#include <begin_vertex>\n land=vec4((modelMatrix*vec4(position,1.)).xyz,exposed);');
-    shader.fragmentShader = 'varying vec4 land;\n' + noise + readWake + shader.fragmentShader;
-    if (sculpt) {
-      shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
-        vec3 groundPhoto = texture2D(map,vMapUv).rgb;
-        float grit = dot(groundPhoto,vec3(.2126,.7152,.0722));
-        diffuseColor.rgb *= .54 + grit*2.4;
-        diffuseColor.rgb *= mix(vec3(1.),vec3(1.32,1.04,.75),land.w*.65);
-        diffuseColor.rgb *= mix(vec3(.57,.65,.61),vec3(1.),smoothstep(-.57,.08,land.y));
-      `);
-    }
+    shader.fragmentShader = 'uniform sampler2D beach, gravel; varying vec4 land;\n' + noise + readWake + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+      vec2 p = land.xz;
+      float shelter = noise(p*.37);
+      mat2 turn = mat2(.62,.79,-.79,.62);
+      vec3 turf = mix(texture2D(map,vMapUv).rgb,texture2D(map,turn*vMapUv*.47).rgb,.39);
+      vec3 sandPhoto = texture2D(beach,turn*p*.49).rgb;
+      vec3 grit = texture2D(gravel,p*.62 + vec2(0.,land.y*.12)).rgb;
+      float shore = ${landscape.water ? '1. - smoothstep(-.42 + shelter*.22,.36 + shelter*.28,land.y)' : isDunes ? '1.' : '0.'};
+      vec3 photograph = mix(turf,sandPhoto,shore);
+      photograph = mix(photograph,grit,max(land.w*.81,shore*shelter*.46));
+      diffuseColor.rgb *= .40 + sqrt(photograph)*1.42;
+      ${landscape.water ? 'diffuseColor.rgb *= mix(vec3(.51,.63,.59),vec3(1.),smoothstep(-.57,.01,land.y));' : ''}
+    `);
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
       #include <color_fragment>
       float low = noise(land.xz*.56);
@@ -199,112 +207,8 @@ function makeGround(mobile, landscape, wakeUniforms, sculpt) {
   return { ground, horizon };
 }
 
-function makeWater(clock, warmth, haze, light, night, air, landscape, skyUniforms) {
-  const [deep, shallows] = landscape.water.map(hex => new THREE.Color(hex));
-  const estuary = landscape.name === 'meadow';
-  const width = estuary ? 384 : 192, height = estuary ? 416 : 208;
-  const area = new THREE.Vector4(-106, -172, 212, 214);
-  const bed = new Uint8Array(width * height);
-  for (let row = 0; row < height; row++) {
-    const z = area.y + (row + 0.5) * area.w / height;
-    for (let column = 0; column < width; column++) {
-      const x = area.x + (column + 0.5) * area.z / width;
-      bed[row * width + column] = Math.round(clamp((waterHeight - terrain(x, z, landscape)) / 3.1, 0, 1) * 255);
-    }
-  }
-  const depth = new THREE.DataTexture(bed, width, height, THREE.RedFormat);
-  depth.minFilter = depth.magFilter = THREE.LinearFilter;
-  depth.needsUpdate = true;
-  const plane = new THREE.PlaneGeometry(horizonSpan, horizonSpan);
-  plane.rotateX(-Math.PI / 2);
-  plane.translate(0, waterHeight, 0);
-  const mesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
-    uniforms: {
-      clock, warmth, haze, light, night, air, ...skyUniforms, deep: { value: deep }, shallows: { value: shallows },
-      depthMap: { value: depth }, reliefBounds: { value: area },
-      swell: { value: landscape.name === 'coast' ? 0.65 : landscape.name === 'dunes' ? 0.38 : 0.17 },
-    },
-    vertexShader: vertex,
-    fragmentShader: `
-      uniform float clock, warmth, night, swell;
-      uniform vec3 light, haze, deep, shallows;
-      uniform vec4 air, reliefBounds;
-      uniform sampler2D depthMap;
-      varying vec3 world;
-      ${noise}
-      ${estuarySkyGLSL}
-      void main() {
-        vec3 eye = normalize(cameraPosition-world);
-        vec2 p = world.xz;
-        vec2 bedUV = (p-reliefBounds.xy)/reliefBounds.zw;
-        vec2 border = min(bedUV,1.-bedUV);
-        float depth = mix(1.,texture2D(depthMap,bedUV).r,smoothstep(0.,.027,min(border.x,border.y)));
-        float ripple = noise(p*.14) * 2.6;
-        float waveTime = clock * (.48 + air.w);
-        float a = p.x*.66+p.y*1.72-waveTime*.62+ripple;
-        float b = p.x*1.11-p.y*.82-waveTime*.43-ripple*.79;
-        float foil = sin(p.x*.24+p.y*.61-waveTime+ripple*.48);
-        float crossRipple = cos(p.x*2.33 + p.y*2.82 + 3.*ripple - waveTime*1.72);
-        vec3 n = normalize(vec3(.032*cos(a)+.019*cos(b)+swell*.055*foil+crossRipple*.015,
-          1.,.036*cos(a)-.018*cos(b)+crossRipple*.012));
-        float f = pow(1.-abs(eye.y), 2.8);
-        vec3 reflected = mix(shallows, haze, warmth*.25+.12);
-        vec3 color = mix(mix(shallows*.68,deep,smoothstep(.04,.65,depth)), reflected, .10+.75*f);
-        if (authoredSky > .5) {
-          float detail = 1.-smoothstep(.10,.60,length(fwidth(p)));
-          float gust = noise(p*.31+vec2(.04,-.08)*waveTime);
-          float chop = sin(dot(p,vec2(2.1,6.9))-waveTime*2.05+ripple*2.6+gust*2.4);
-          float crossChop = cos(dot(p,vec2(-5.8,3.1))-waveTime*1.47-ripple*1.4+gust*3.3);
-          vec3 rippledNormal = normalize(vec3(n.x*.55,n.y,n.z*.55)
-            + vec3(.020*chop-.031*crossChop,0.,.032*chop+.012*crossChop)*detail*(.53+.76*gust));
-          float facing = clamp(dot(eye,rippledNormal),0.,1.);
-          vec2 through = p + rippledNormal.xz * (1. + depth*3.5);
-          float grit = noise(through*4.7)*.65+noise(through*12.)*.35;
-          float sunlightRibs = pow(max(0.,sin(6.1*a + sin(3.5*b)*1.9)),8.)*detail;
-          vec3 bedColor = mix(vec3(.13,.119,.065),vec3(.37,.27,.127),grit);
-          bedColor *= .88 + .45*sunlightRibs;
-          vec3 body = mix(shallows,deep,smoothstep(.09,.76,depth));
-          vec3 absorb = exp(-depth*(7. + 3.*(1.-facing))*vec3(1.59,.98,.82));
-          vec3 transmitted = mix(body,bedColor,absorb);
-          vec3 reflectedRay = reflect(-eye,rippledNormal);
-          vec3 mirror = estuarySkyAt(reflectedRay)*vec3(.37,.62,.72);
-          // Use the bathymetry to dim sky reflections that meet the bank.
-          vec2 towardBank = reflectedRay.xz/reliefBounds.zw;
-          float reflectedDepth = texture2D(depthMap,bedUV+towardBank*2.4).r;
-          float bank = (1.-smoothstep(.006,.08,reflectedDepth)) * smoothstep(.025,.075,min(border.x,border.y));
-          bank *= 1.-smoothstep(.045,.35,reflectedRay.y);
-          mirror *= mix(vec3(1.),vec3(.42,.63,.49),bank*.75);
-          float fresnel = .04+.53*pow(1.-facing,4.2);
-          color = mix(transmitted,mirror,fresnel);
-          float reflection = max(dot(reflect(-light,rippledNormal),eye),0.);
-          float gleam = pow(reflection,mix(116.,260.,detail));
-          color += vec3(.92,.65,.35)*(gleam*.47+pow(reflection,44.)*.068)*(.58+.42*gust);
-          color *= .94+.10*foil+.07*chop*detail;
-        } else {
-          float reflection = max(dot(reflect(-light,n),eye),0.);
-          float glimmer = max(0., sin(a*1.42+sin(b*1.34)*1.8));
-          float gloss = pow(reflection, mix(110.,152.,night));
-          color += mix(vec3(.88,.72,.49),vec3(.40,.62,1.02),night)
-            * (gloss * 0.77 + pow(reflection,24.) * .16) * (0.38 + .62 * glimmer);
-          color += mix(vec3(.031,.049,.049),vec3(.004,.009,.02),night)
-            * pow(glimmer,5.) * (.25+.75*noise(p*.43));
-        }
-        float foam = smoothstep(.42,.90, sin(depth*36. + foil*2.2 + waveTime*.77) * .60 + noise(p*2.6)*.62);
-        foam *= (1.-smoothstep(.04,.25,depth)) * smoothstep(.005,.035,depth) * swell;
-        color = mix(color, mix(vec3(.71,.78,.72),vec3(.084,.16,.27),night),foam*.53);
-        float distanceToEye = length(cameraPosition-world);
-        color = mix(color,haze,1.-exp(-distanceToEye*distanceToEye*air.x*air.x));
-        gl_FragColor = vec4(color,1.);
-        ${colorOutput}
-      }
-    `,
-  }));
-  mesh.userData.depthTexture = depth;
-  return mesh;
-}
-
 function grassGeometry() {
-  const positions = [], indices = [], grain = [];
+  const positions = [], uvs = [], indices = [], grain = [];
   const rng = randomFrom(52);
   for (let blade = 0; blade < 4; blade++) {
     const start = positions.length / 3;
@@ -318,6 +222,7 @@ function grassGeometry() {
           height * y,
           z + Math.sin(facing) * width * taper * side + 0.15 * y * y,
         );
+        uvs.push(.5 + side*.43, 1 - y);
         grain.push(0);
       }
     }
@@ -328,17 +233,19 @@ function grassGeometry() {
   positions.push(0.015, 0.97, 0.27, -0.046, 1.13, 0.29, 0.015, 1.34, 0.40, 0.067, 1.16, 0.33);
   positions.push(0.015, 0.97, 0.27, 0.03, 1.12, 0.27, 0.015, 1.34, 0.40, 0.01, 1.16, 0.37);
   grain.push(1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2);
+  for (let i = 0; i < 3; i++) uvs.push(.1,.95,.9,.95,.1,0,.9,0);
   for (let i = head; i < head + 12; i += 4) indices.push(i, i + 1, i + 2, i, i + 2, i + 3);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('grain', new THREE.Float32BufferAttribute(grain, 1));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   return geometry;
 }
 
-function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobile, landscape, air, fescue) {
-  const rng = randomFrom(32160);
-  const [base, tips, density, stature, spread] = landscape.plants;
+function makeGrass(parent, clock, warmth, haze, night, light, wakeUniforms, pulse, glades, mobile, landscape, air, leafMap, fescue) {
+  const [base, tips] = landscape.plants;
   const blades = fescue?.clone() ?? grassGeometry();
   if (fescue) {
     const color = blades.attributes.color;
@@ -346,54 +253,13 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
     for (let i = 0; i < seed.length; i++) seed[i] = color.getX(i) > color.getY(i) ? 2 : 0;
     blades.setAttribute('grain', new THREE.BufferAttribute(seed, 1));
   }
-  const tiles = new Map();
-  const tileSize = 16;
-  const cliffCountry = landscape.name === 'coast' || landscape.name === 'alpine' || landscape.name === 'dunes';
-  function plant(x, z, near) {
-    const y = terrain(x, z, landscape);
-    if (landscape.water && y < waterHeight + 0.14) return;
-    const cover = groundCover(x, z);
-    if (rng() > (fescue ? 0.61 + cover * 0.39 : 0.44 + cover * 0.56)) return;
-    if (cliffCountry && y > 2.7 && rng() < 0.92) {
-      const slope = Math.hypot(terrain(x + 0.6, z, landscape) - y, terrain(x, z + 0.6, landscape) - y) / 0.6;
-      if (slope > 0.93) return;
-    }
-    const reed = landscape.name === 'marsh' ? y < 0.54 && rng() < 0.61
-      : landscape.name === 'meadow' && Math.abs(channel(x, z)) < 1.43 && z < 15 && rng() < 0.39;
-    const height = reed ? 0.85 + rng() * 0.65 : 0.24 + rng() * (near ? 0.61 : 0.69) + cover * 0.13;
-    const seed = reed || (cover > 0.59 && rng() < 0.27);
-    const key = `${Math.floor(x / tileSize)},${Math.floor(z / tileSize)}`;
-    let tile = tiles.get(key);
-    if (!tile) {
-      tile = { tuft: [], style: [], bounds: new THREE.Box3() };
-      tiles.set(key, tile);
-    }
-    tile.tuft.push(x, y - 0.045, z, height * stature);
-    tile.style.push(rng() * 6.283, (0.51 + rng() * 1.04) * spread, rng(), reed ? 2 : seed ? 1 : 0);
-    tile.bounds.min.min(boundsPoint.set(x, y, z));
-    tile.bounds.max.max(boundsPoint.set(x, y + height * stature * 1.4, z));
-  }
-  const boundsPoint = new THREE.Vector3();
-  const foreground = fescue ? (mobile ? 28500 : 65700) : (mobile ? 18800 : 39700);
-  for (let i = 0; i < foreground * density; i++) {
-    plant((rng() - 0.5) * 98, 20 - rng() * 151, true);
-  }
-  for (let i = 0; i < (mobile ? 4300 : 8800) * density; i++) {
-    plant((rng() - 0.5) * 177, 35 - rng() * 205, false);
-  }
-  if (fescue) {
-    for (let i = 0; i < (mobile ? 3700 : 8600); i++) {
-      plant(-22 + rng() * 46, 16 - rng() * 54, true);
-    }
-  }
-
   const glow = { value: new Float32Array(3) };
-  const range = mobile ? 53 : 82;
+  const ranges = mobile ? [58, 25] : [92, 40];
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: {
-      clock, warmth, haze, night, pulse, glow, air, ...wakeUniforms,
-      range: { value: fescue ? range : 250 },
+      clock, warmth, haze, night, pulse, glow, air, light, ...wakeUniforms,
+      range: { value: ranges[0] }, leafMap: { value: leafMap },
       coastalFescue: { value: fescue ? 1 : 0 },
       baseTint: { value: new THREE.Color(base) }, tipTint: { value: new THREE.Color(tips) },
       seedTint: { value: new THREE.Color(landscape.seedColor) },
@@ -405,15 +271,20 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
       uniform float clock, range;
       uniform vec4 air;
       varying vec3 world;
+      varying vec3 leafNormal;
       varying vec4 plant;
-      varying vec2 surface;
+      varying vec2 surface, leafUV;
       ${readWake}
       void main() {
         vec3 local = position;
         if (grain > .5 && style.w < .5) local = vec3(0.);
         float ca=cos(style.x), sa=sin(style.x);
-        local.xz = mat2(ca, -sa, sa, ca)*local.xz * style.y;
-        float distanceFade = 1.-smoothstep(range-18.,range,distance(tuft.xz,cameraPosition.xz));
+        mat2 yaw = mat2(ca, -sa, sa, ca);
+        float distanceFade = 1.-smoothstep(range*.67,range,distance(tuft.xz,cameraPosition.xz));
+        local.xz = yaw*local.xz * style.y * distanceFade;
+        leafNormal = normal;
+        leafNormal.xz = yaw*normal.xz;
+        leafUV = uv;
         local.y *= tuft.w * distanceFade;
         float motion = clock * (.63 + air.w*.48);
         float wind = sin(tuft.x*.090 + tuft.z*.074 - motion*.94);
@@ -432,12 +303,14 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
     `,
     fragmentShader: `
       uniform float clock, warmth, night, coastalFescue, glow[3];
-      uniform vec3 haze, pulse, baseTint, tipTint, seedTint;
+      uniform vec3 haze, pulse, baseTint, tipTint, seedTint, light;
+      uniform sampler2D leafMap;
       uniform vec4 air;
       uniform vec2 patches[3];
       varying vec3 world;
+      varying vec3 leafNormal;
       varying vec4 plant;
-      varying vec2 surface;
+      varying vec2 surface, leafUV;
       void main() {
         float restoration = 0.;
         for(int i=0; i<3; i++) restoration += glow[i]*exp(-dot(world.xz-patches[i],world.xz-patches[i])*.011);
@@ -445,7 +318,10 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
         vec3 tip = tipTint * (.58 + plant.y*.48);
         tip = mix(tip,tipTint*.88 + vec3(.09,.08,.03),plant.z*.61);
         vec3 color = mix(base,tip,smoothstep(0.,.96,plant.x));
-        color *= .79 + .26 * plant.y + .11*plant.w;
+        float sun = abs(dot(normalize(leafNormal),light));
+        float fiber = dot(texture2D(leafMap,leafUV).rgb,vec3(.21,.72,.07));
+        color *= (.71 + .25 * plant.y + .09*plant.w) * (.78 + .37*sun*air.z);
+        color *= .79+.33*smoothstep(.025,.17,fiber);
         color *= mix(vec3(1.),mix(vec3(.72,.97,1.04),vec3(1.38,1.04,.62),plant.y),coastalFescue);
         color = mix(color,seedTint*(.87 + plant.y*.17),smoothstep(1.,1.65,surface.x)*.88);
         color *= 1. - surface.y*.18*(1. - plant.x*.63);
@@ -466,37 +342,79 @@ function makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, glades, mobi
       }
     `,
   });
-  const meshes = [...tiles.values()].map(({ tuft, style, bounds }) => {
+  function makeTile(tuft, style, range) {
+    const bounds = new THREE.Box3(), point = new THREE.Vector3();
+    for (let i = 0; i < tuft.length; i += 4) bounds.expandByPoint(point.fromArray(tuft, i));
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.setIndex(blades.index);
-    geometry.setAttribute('position', blades.attributes.position);
-    geometry.setAttribute('grain', blades.attributes.grain);
+    for (const attr of ['position', 'normal', 'uv', 'grain']) geometry.setAttribute(attr, blades.attributes[attr]);
     geometry.setAttribute('tuft', new THREE.InstancedBufferAttribute(new Float32Array(tuft), 4));
     geometry.setAttribute('style', new THREE.InstancedBufferAttribute(new Float32Array(style), 4));
     geometry.instanceCount = tuft.length / 4;
     geometry.boundingSphere = bounds.expandByScalar(3.5).getBoundingSphere(new THREE.Sphere());
-    return new THREE.Mesh(geometry, material);
-  });
-  return { meshes, material, glow, range: fescue ? range : 250 };
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.layers.set(1);
+    mesh.onBeforeRender = () => {
+      material.uniforms.range.value = range;
+      material.uniformsNeedUpdate = true;
+    };
+    parent.add(mesh);
+    return mesh;
+  }
+
+  const tiles = new Map();
+  let lastColumn, lastRow;
+  function update(x, z) {
+    const column = Math.floor(x / grassTileSize), row = Math.floor(z / grassTileSize);
+    if (column === lastColumn && row === lastRow) return;
+    lastColumn = column;
+    lastRow = row;
+    const active = new Set();
+    for (const [layer, range] of ranges.entries()) {
+      const reach = Math.ceil(range / grassTileSize) + 1;
+      for (let j = row - reach; j <= row + reach; j++) {
+        for (let i = column - reach; i <= column + reach; i++) {
+          if (Math.hypot(i - column, j - row) * grassTileSize > range + grassTileSize * 1.42) continue;
+          const key = `${layer}:${i}:${j}`;
+          active.add(key);
+          if (tiles.has(key)) continue;
+          const { tuft, style } = sampleGrassTile(landscape, i, j, layer === 1, mobile);
+          tiles.set(key, tuft.length ? makeTile(tuft, style, range) : null);
+        }
+      }
+    }
+    for (const [key, mesh] of tiles) {
+      if (active.has(key)) continue;
+      if (mesh) {
+        parent.remove(mesh);
+        // Keep the blade buffers shared with the surrounding tiles alive.
+        for (const attr of ['position', 'normal', 'uv', 'grain']) mesh.geometry.deleteAttribute(attr);
+        mesh.geometry.setIndex(null);
+        mesh.geometry.dispose();
+      }
+      tiles.delete(key);
+    }
+  }
+  return { material, glow, update };
 }
 
-function makeRocks(landscape, mobile) {
+function makeRocks(landscape, mobile, rock) {
   const rng = randomFrom(870);
   const [color, scale, profile, elongation] = landscape.stone;
-  const stone = new THREE.Color(color);
+  const stone = new THREE.Color(color).lerp(new THREE.Color(0xffffff), .55);
+  const columns = mobile ? 13 : 20, rows = mobile ? 12 : 18;
   const rocks = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(1, 2),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94, flatShading: true }),
-    mobile ? 82 : 105,
+    rock.geometry.clone(), rock.material.clone(), columns * rows,
   );
   const dummy = new THREE.Object3D();
   const shade = new THREE.Color();
   let placed = 0;
-  for (let i = 0; i < rocks.count + 40 && placed < rocks.count; i++) {
-    const z = 12 - rng() * 120;
-    const x = i < 60 ? (rng() - 0.5) * 99 : 14 + rng() * 28;
-    const size = scale * (i < 15 ? 0.8 + rng() * 1.6 : 0.12 + rng() * 0.81);
+  for (let i = 0; i < columns * rows; i++) {
+    const z = 47 - (Math.floor(i / columns) + rng()) * 260 / rows;
+    const x = -148 + (i % columns + rng()) * 296 / columns;
+    const size = scale * (.19 + Math.pow(rng(), 2.1) * 1.65);
     const height = terrain(x, z, landscape);
+    if (landscape.water && height < waterHeight + .11) continue;
     const slope = Math.hypot(terrain(x + size, z, landscape) - height, terrain(x, z + size, landscape) - height) / size;
     if (slope > 0.82) continue;
     dummy.position.set(x, height - size * (0.18 + 0.31 * slope), z);
@@ -504,44 +422,19 @@ function makeRocks(landscape, mobile) {
     dummy.scale.set(size, size * profile * (0.68 + rng() * 0.58), size * elongation * (0.66 + rng() * 0.45));
     dummy.updateMatrix();
     rocks.setMatrixAt(placed, dummy.matrix);
-    shade.copy(stone).multiplyScalar(0.66 + rng() * 0.57);
+    shade.copy(stone).multiplyScalar(0.74 + rng() * 0.60);
     rocks.setColorAt(placed++, shade);
   }
   rocks.count = placed;
   return rocks;
 }
 
-function makeOutcrops(landscape) {
+function makeOutcrops(landscape, shelf) {
   const rng = randomFrom(5317);
-  const sides = 13;
-  const rings = [[-0.20, 1.04], [0.04, 1], [0.25, 0.96], [0.29, 0.92], [0.47, 0.91],
-    [0.53, 0.84], [0.70, 0.83], [0.78, 0.78], [0.93, 0.74], [1, 0.46], [1.02, 0]];
-  const radial = Array.from({ length: sides }, () => [0.82 + rng() * 0.30, rng() - 0.5]);
-  const positions = [], colors = [], indices = [];
-  for (const [layer, [y, radius]] of rings.entries()) {
-    for (let side = 0; side < sides; side++) {
-      const [scale, roughness] = radial[side];
-      const angle = (side + roughness * 0.47) / sides * Math.PI * 2 + y * 0.24;
-      positions.push(Math.cos(angle) * scale * radius + y * 0.21,
-        y + roughness * radius * 0.13, Math.sin(angle) * scale * radius - y * 0.13);
-      const seam = layer === 3 || layer === 5 || layer === 7 ? 0.79 : 1;
-      const tone = seam * (0.85 + y * 0.13 + roughness * 0.22 + rng() * 0.10);
-      colors.push(tone, tone, tone);
-      if (layer) {
-        const point = layer * sides + side, next = layer * sides + (side + 1) % sides;
-        indices.push(point - sides, point, next, point - sides, next, next - sides);
-      }
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  const rock = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, flatShading: true });
-  const mesh = new THREE.InstancedMesh(geometry, rock, landscape.outcrops.length);
+  const mesh = new THREE.InstancedMesh(shelf.geometry.clone().translate(0, .31, 0), shelf.material.clone(), landscape.outcrops.length);
   const dummy = new THREE.Object3D();
   const tone = new THREE.Color();
+  const white = new THREE.Color(0xffffff);
   landscape.outcrops.forEach(([x, z, width, height, length, turn], i) => {
     const center = terrain(x, z, landscape);
     const foot = Math.min(center, terrain(x - width * 0.51, z, landscape), terrain(x + width * 0.51, z, landscape),
@@ -551,7 +444,7 @@ function makeOutcrops(landscape) {
     dummy.scale.set(width, height, length);
     dummy.updateMatrix();
     mesh.setMatrixAt(i, dummy.matrix);
-    mesh.setColorAt(i, tone.setHex(landscape.stone[0]).multiplyScalar(0.79 + rng() * 0.36));
+    mesh.setColorAt(i, tone.setHex(landscape.stone[0]).lerp(white, .53).multiplyScalar(0.79 + rng() * 0.36));
   });
   return mesh;
 }
@@ -732,6 +625,7 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(fogColor, 0.0095);
   const camera = new THREE.PerspectiveCamera(53, 1, 0.065, 355);
+  camera.layers.enable(1);
   const clock = { value: 0 }, warmth = { value: 0 }, haze = { value: fogColor.clone() };
   const skyTint = { value: new THREE.Color() };
   const night = { value: 0 };
@@ -758,6 +652,7 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
   const dot = softDot();
   const flowers = makeFlowers(journey.meadow.flowers.length, dot, art.petal);
   const petals = makePetals(art.petal);
+  petals.layers.set(1);
   const marker = new THREE.Sprite(new THREE.SpriteMaterial({
     map: dot, color: 0xffecbf, opacity: 0.95, depthWrite: false, toneMapped: false,
   }));
@@ -956,7 +851,8 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
     }
     camera.position.copy(eye);
     sky.position.copy(eye);
-    horizon.position.set(eye.x, 0, eye.z);
+    horizon.position.x = eye.x;
+    horizon.position.z = eye.z;
     camera.lookAt(look);
     if (!reduced && active) camera.rotateZ(flight.steer * (-0.029 - speed * 0.058));
     gustMotes?.draw(eye, forwardX, forwardZ, active ? speed : 0, time, landscape);
@@ -972,10 +868,11 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
     reposition = true;
     const { level, meadow } = journey;
     if (landscape !== level.landscape) {
-      const materials = new Set();
+      const materials = new Set(grass ? [grass.material] : []);
       for (const mesh of scenery.children) {
         mesh.geometry.dispose();
-        materials.add(mesh.material);
+        if (mesh.isReflector) mesh.dispose();
+        else materials.add(mesh.material);
         mesh.userData.depthTexture?.dispose();
         if (mesh.isInstancedMesh) mesh.dispose();
       }
@@ -988,12 +885,11 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
       air.value.set(fog, cloud, sunlightStrength, wind);
       clouds.value.fromArray(landscape.clouds);
       skyUniforms.authoredSky.value = authored ? 1 : 0;
-      grass = makeGrass(clock, warmth, haze, night, wakeUniforms, pulse, meadow.glades, mobile, landscape, air,
-        authored ? art.grass : undefined);
-      const { ground, horizon: plain } = makeGround(mobile, landscape, wakeUniforms, authored ? art.ground : undefined);
-      horizon = plain ?? makeWater(clock, warmth, haze, light, night, air, landscape, skyUniforms);
-      scenery.add(ground, horizon, ...grass.meshes,
-        makeRocks(landscape, mobile), makeOutcrops(landscape));
+      grass = makeGrass(scenery, clock, warmth, haze, night, light, wakeUniforms, pulse, meadow.glades, mobile, landscape,
+        air, art.leaf, authored ? art.grass : undefined);
+      const { ground, horizon: plain } = makeGround(mobile, landscape, wakeUniforms, art, authored ? art.ground : undefined);
+      horizon = plain ?? makeWater(horizonSpan, clock, haze, light, night, air, landscape, art, mobile);
+      scenery.add(ground, horizon, makeRocks(landscape, mobile, art.boulder), makeOutcrops(landscape, art.shelf));
       if (authored) {
         const landmarks = makeEstuaryLandmarks(art, clock, mobile);
         for (const landmark of landmarks) {
@@ -1003,7 +899,10 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
         scenery.add(...landmarks);
       }
       weather = makeWeather(weatherByLandscape[landscape.name], landscape, dot, mobile, reduced);
-      if (weather) scenery.add(weather.mesh);
+      if (weather) {
+        weather.mesh.layers.set(1);
+        scenery.add(weather.mesh);
+      }
     }
     grass.glow.value.fill(0);
     levelFog.setHex(level.haze);
@@ -1079,12 +978,7 @@ export function createMeadowView(canvas, journey, mobile, reduced, art) {
       });
       drawFlowers(time, destination);
       drawFlight(flight, time, dt, total, destination, active);
-      if (skyUniforms.authoredSky.value > .5) {
-        for (const mesh of grass.meshes) {
-          const { center, radius } = mesh.geometry.boundingSphere;
-          mesh.visible = Math.hypot(center.x - eye.x, center.z - eye.z) < grass.range + radius;
-        }
-      }
+      grass.update(eye.x, eye.z);
       weather?.draw(camera, time);
       renderer.render(scene, camera);
     },

@@ -2,27 +2,45 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import models from '../art/first-light.glb';
 import sky from '../art/blender-sky.jpg';
+import tide from '../art/tidal-normals.png';
+import riverbed from '../art/riverbed.jpg';
+import shore from '../art/shore-sand.jpg';
+import bark from '../art/pine-bark.jpg';
+import barkNormals from '../art/pine-normal.jpg';
+import blade from '../art/blade.jpg';
 
-export async function loadEstuaryArt() {
-  const url = URL.createObjectURL(new Blob([sky], { type: 'image/jpeg' }));
+async function loadTexture(bytes, type = 'image/jpeg', colorSpace = THREE.SRGBColorSpace) {
+  const url = URL.createObjectURL(new Blob([bytes], { type }));
   try {
-    const [kit, panorama] = await Promise.all([
-      new GLTFLoader().parseAsync(models.buffer.slice(models.byteOffset, models.byteOffset + models.byteLength), ''),
-      new THREE.TextureLoader().loadAsync(url),
-    ]);
-    panorama.colorSpace = THREE.SRGBColorSpace;
-    panorama.wrapS = THREE.RepeatWrapping;
-    kit.scene.updateMatrixWorld(true);
-    return {
-      panorama,
-      ground: kit.scene.getObjectByName('FirstLightTerrain'),
-      grass: kit.scene.getObjectByName('FescueTuft').geometry,
-      petal: kit.scene.getObjectByName('WildflowerPetal').geometry,
-      landmarks: kit.scene.children.filter(node => node.name.startsWith('Estuary')),
-    };
+    const map = await new THREE.TextureLoader().loadAsync(url);
+    map.colorSpace = colorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+    map.anisotropy = 4;
+    return map;
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+export async function loadEstuaryArt() {
+  const [kit, panorama, ripples, pebbles, sand, branches, branchNormals, leaf] = await Promise.all([
+    new GLTFLoader().parseAsync(models.buffer.slice(models.byteOffset, models.byteOffset + models.byteLength), ''),
+    loadTexture(sky), loadTexture(tide, 'image/png', THREE.NoColorSpace),
+    loadTexture(riverbed), loadTexture(shore), loadTexture(bark),
+    loadTexture(barkNormals, 'image/jpeg', THREE.NoColorSpace), loadTexture(blade),
+  ]);
+  panorama.wrapT = THREE.ClampToEdgeWrapping;
+  branches.flipY = branchNormals.flipY = leaf.flipY = false;
+  kit.scene.updateMatrixWorld(true);
+  return {
+    panorama, ripples, pebbles, sand, branches, branchNormals, leaf,
+    ground: kit.scene.getObjectByName('FirstLightTerrain'),
+    grass: kit.scene.getObjectByName('FescueTuft').geometry,
+    petal: kit.scene.getObjectByName('WildflowerPetal').geometry,
+    boulder: kit.scene.getObjectByName('RoundedShoreRock'),
+    shelf: kit.scene.getObjectByName('LayeredShoreRock'),
+    landmarks: kit.scene.children.filter(node => node.name.startsWith('Estuary')),
+  };
 }
 
 export function makeEstuaryLandmarks(art, clock, mobile) {
@@ -30,15 +48,23 @@ export function makeEstuaryLandmarks(art, clock, mobile) {
   let reedNumber = 0;
   for (const source of art.landmarks) {
     if (mobile && source.name.startsWith('EstuaryReeds') && reedNumber++ % 3 === 0) continue;
-    const sources = groups.get(source.geometry) ?? [];
+    const tile = `${source.geometry.id}:${Math.floor(source.position.x / 42)}:${Math.floor(source.position.z / 42)}`;
+    const sources = groups.get(tile) ?? [];
     sources.push(source);
-    groups.set(source.geometry, sources);
+    groups.set(tile, sources);
   }
-  return Array.from(groups, ([geometry, sources]) => {
+  return Array.from(groups.values(), sources => {
     const name = sources[0].name;
     const material = sources[0].material.clone();
-    if (name.startsWith('EstuaryReeds') || name.startsWith('EstuaryPine')) {
-      const strength = name.startsWith('EstuaryReeds') ? 0.055 : 0.0024;
+    const reed = name.startsWith('EstuaryReeds');
+    const pine = name.startsWith('EstuaryPine');
+    if (pine) {
+      material.map = art.branches;
+      material.normalMap = art.branchNormals;
+      material.normalScale.set(.56, .56);
+    }
+    if (reed || pine) {
+      const strength = reed ? 0.055 : 0.0024;
       material.customProgramCacheKey = () => `coastal vegetation ${strength}`;
       material.onBeforeCompile = shader => {
         shader.uniforms.breezeTime = clock;
@@ -52,7 +78,7 @@ export function makeEstuaryLandmarks(art, clock, mobile) {
         `);
       };
     }
-    const mesh = new THREE.InstancedMesh(geometry.clone(), material, sources.length);
+    const mesh = new THREE.InstancedMesh(sources[0].geometry.clone(), material, sources.length);
     sources.forEach((source, i) => mesh.setMatrixAt(i, source.matrixWorld));
     mesh.computeBoundingSphere();
     return mesh;

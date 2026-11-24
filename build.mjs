@@ -15,7 +15,7 @@ const [template, css, font, threeLicense, fontLicense, bundle] = await Promise.a
     minify: true,
     legalComments: 'none',
     target: ['chrome108', 'safari16', 'firefox115'],
-    loader: { '.mp3': 'binary', '.glb': 'binary', '.jpg': 'binary' },
+    loader: { '.mp3': 'binary', '.glb': 'binary', '.jpg': 'binary', '.png': 'binary' },
   }),
 ]);
 
