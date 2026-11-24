@@ -15,7 +15,7 @@ const [template, css, font, threeLicense, fontLicense, bundle] = await Promise.a
     minify: true,
     legalComments: 'none',
     target: ['chrome108', 'safari16', 'firefox115'],
-    loader: { '.mp3': 'binary' },
+    loader: { '.mp3': 'binary', '.glb': 'binary', '.jpg': 'binary' },
   }),
 ]);
 
@@ -23,6 +23,7 @@ const notices = [threeLicense, fontLicense, [
   'Audio samples from Versilian Studios VSCO 2 Community Edition (CC0 1.0).',
   'Upright piano sampled by Simon Dalzell of Ivy Audio.',
   'Sample source https://github.com/sgossner/VSCO-2-CE',
+  'First Light sky and texture references are CC0 from Poly Haven. See the project README.',
 ].join('\n')].join('\n\n').replaceAll('-->', '-- >');
 const result = template
   .replace('/*__STYLE__*/', () => css.replace('__DISPLAY_FONT__', font.toString('base64')))

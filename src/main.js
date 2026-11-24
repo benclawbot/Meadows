@@ -1,6 +1,7 @@
-import { collectBlooms, curve, flightSurface, nearbyBloomTurn, smooth, stepFlight, tiltControl } from './flight.js';
+import { collectBlooms, curve, flightSurface, gustStrength, nearbyBloomTurn, smooth, stepFlight, tiltControl } from './flight.js';
 import { advanceLeg, beginLevel, bloomObjective, canBloom, crossRing, currentLeg, journeyProgress, journeyTarget, levels } from './journey.js';
 import { createMeadowView } from './meadow-view.js';
+import { loadEstuaryArt } from './estuary-art.js';
 import { MeadowScore } from './score.js';
 import piano45 from '../samples/piano45.mp3';
 import piano53 from '../samples/piano53.mp3';
@@ -22,6 +23,7 @@ import harp79 from '../samples/harp79.mp3';
 const byId = id => document.getElementById(id);
 const canvas = byId('meadow');
 const begin = byId('begin');
+const gustButton = byId('gust');
 const title = byId('title-screen');
 const paused = byId('paused');
 const hint = byId('hint');
@@ -71,6 +73,7 @@ let pointerId = null;
 let anchor = null;
 let pointer = [0, 0];
 let gust = false;
+let gustPointer = null;
 const keys = new Set();
 const steerKeys = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'a', 'd', 'w', 's', ' ']);
 
@@ -82,11 +85,12 @@ function sayHint(message, seconds = 6) {
 
 function guidance() {
   if (mode === 'tilt') return 'Tilt to steer. Hold the meadow for a gust.';
-  if (mode === 'touch') return 'Drag to steer. Let go to glide.';
+  if (mode === 'touch') return 'Drag to steer. Hold Gust to surge ahead.';
   return 'Move the mouse to steer. Hold to send a gust.';
 }
 
 function renderInputMode() {
+  gustButton.hidden = !started || mode !== 'touch';
   byId('recenter').hidden = mode !== 'tilt';
   byId('reset-tilt').hidden = mode !== 'tilt';
   byId('change-input').hidden = !touchDevice;
@@ -97,6 +101,7 @@ function renderInputMode() {
 function resetInput() {
   pointer = [0, 0];
   pointerId = null;
+  gustPointer = null;
   anchor = null;
   gust = false;
   keys.clear();
@@ -178,7 +183,7 @@ function sampleControl() {
   const axes = mode === 'tilt' && motionReference && motionReading
     ? tiltControl(motionReference, motionReading, motionAngle)
     : pointer;
-  return { x: Math.sign(axisX) || axes[0], y: Math.sign(axisY) || axes[1], gust: gust || keys.has(' ') };
+  return { x: Math.sign(axisX) || axes[0], y: Math.sign(axisY) || axes[1], gust: gust || gustPointer !== null || keys.has(' ') };
 }
 
 function showProgress() {
@@ -235,6 +240,7 @@ function startLevel(index) {
   title.hidden = true;
   byId('flight-controls').hidden = false;
   byId('objective').hidden = false;
+  renderInputMode();
   if (touchDevice && firstFlight) void useTilt();
   resumeFlight();
   if (firstFlight && !touchDevice) sayHint(guidance());
@@ -335,6 +341,26 @@ paused.addEventListener('cancel', event => {
   resumeFlight();
 });
 
+gustButton.addEventListener('pointerdown', event => {
+  if (!playing || gustPointer !== null || event.button !== 0) return;
+  event.preventDefault();
+  gustPointer = event.pointerId;
+  gustButton.setPointerCapture(event.pointerId);
+});
+function releaseGust(event) {
+  if (event.pointerId === gustPointer) gustPointer = null;
+}
+gustButton.addEventListener('lostpointercapture', releaseGust);
+gustButton.addEventListener('keydown', event => {
+  if (event.key !== ' ' && event.key !== 'Enter') return;
+  event.preventDefault();
+  if (playing) keys.add(' ');
+});
+gustButton.addEventListener('keyup', event => {
+  if (event.key === ' ' || event.key === 'Enter') keys.delete(' ');
+});
+gustButton.addEventListener('blur', () => keys.delete(' '));
+
 canvas.addEventListener('pointermove', event => {
   if (!playing) return;
   if (mode === 'mouse' && (event.pointerType === 'mouse' || event.pointerType === 'pen')) {
@@ -355,6 +381,7 @@ canvas.addEventListener('pointerdown', event => {
   else gust = true;
 });
 function releasePointer(event) {
+  releaseGust(event);
   if (event.pointerId !== pointerId) return;
   pointerId = null;
   anchor = null;
@@ -419,7 +446,7 @@ function step(dt) {
   for (const flower of meadow.flowers) {
     if (flower.bloomed && flower.growth < 0.999) flower.growth = smooth(flower.growth, 1, dt, 5.8);
   }
-  music.update((flight.speed - 3.65) / (7.3 - 3.65));
+  music.update(gustStrength(flight.speed));
 }
 
 let previousTime = performance.now();
@@ -442,16 +469,22 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-try {
-  view = createMeadowView(canvas, journey, touchDevice, reducedMotion);
-  view.draw(flight, 0, 0, 0, undefined, 0, false);
-  begin.disabled = false;
-  begin.textContent = levelIndex > 0 ? 'Continue drifting' : 'Begin drifting';
-  byId('level-map').disabled = false;
-  requestAnimationFrame(frame);
-} catch (error) {
-  console.error(error);
-  const explanation = byId('start-error');
-  explanation.textContent = 'Salt Meadow needs a browser with WebGL 2 and hardware acceleration.';
-  explanation.hidden = false;
+async function loadMeadow() {
+  try {
+    const art = await loadEstuaryArt();
+    view = createMeadowView(canvas, journey, touchDevice, reducedMotion, art);
+    view.draw(flight, 0, 0, 0, undefined, 0, false);
+    begin.disabled = false;
+    begin.textContent = levelIndex > 0 ? 'Continue drifting' : 'Begin drifting';
+    byId('level-map').disabled = false;
+    previousTime = performance.now();
+    requestAnimationFrame(frame);
+  } catch (error) {
+    console.error(error);
+    const explanation = byId('start-error');
+    explanation.textContent = 'The meadow couldn’t load. Try a current browser with hardware acceleration.';
+    explanation.hidden = false;
+  }
 }
+
+void loadMeadow();

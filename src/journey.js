@@ -11,7 +11,7 @@ export const levels = [
     landscape: landscapes.meadow,
     goal: 'Wake the shallows, cross the western meadow, and bring color back to the coast.',
     finish: 'Morning has reached both sides of the meadow.',
-    haze: 0xa4b2ab, sky: 0x6396a1, light: 0xffe4ab, ringColor: 0xffebba,
+    haze: 0x94b4b8, sky: 0x518caf, light: 0xffdb9b, ringColor: 0xffebba,
     legs: [
       blooms('The shallows', 'Wake nine flowers close to the grass.', bed('Blooms', 0, 9)),
       wind('Over the low hills', 'Follow the wind west, then turn back toward the tidal flats.',
@@ -56,7 +56,7 @@ export const levels = [
       ['Salt bank', [17, -81], [24, -111], 3],
     ],
     legs: [
-      wind('Downstream', 'Stay low as the channel bends toward open water.',
+      wind('Through the tidal gorge', 'Follow the channel between the cliffs toward open water.',
         [16, -24, 2.8], [13, -39, 2.8], [12, -53, 2.7], [17, -66, 3], [25, -78, 3], [34, -90, 3.4], [34, -102, 4]),
       blooms('Salt bank', 'Leave the water and wake ten flowers on the bank.', bed('Blooms', 2, 10)),
       wind('The upper current', 'Climb over the bends, then come down on the other side.',
@@ -126,8 +126,8 @@ export const levels = [
       wind('The amber arc', 'Cross the ridge and turn back into the amber hollow.',
         [4, -53, 7], [15, -65, 12], [10, -81, 15], [-5, -91, 11], [-18, -84, 5]),
       blooms('Amber hollow', 'Wake nine low flowers in the sheltered hollow.', bed('Blooms', 1, 9)),
-      wind('Out of the dunes', 'Cross the length of the dunes and descend toward the shore.',
-        [-33, -89, 6], [-26, -105, 11], [-12, -114, 10], [3, -109, 6], [9, -95, 3]),
+      wind('The sandstone passage', 'Descend into the slot canyon and follow it toward the shore.',
+        [-34, -98, 5], [-27, -106, 4], [-16, -113, 4.3], [-3, -112, 4.5], [11, -100, 3.5]),
       blooms('Salt edge', 'Wake ten flowers above the tide line.', bed('Blooms', 2, 10)),
       wind('Toward the sea', 'Follow the last rings out along the headland.',
         [18, -98, 6], [25, -106, 9], [32, -115, 13], [35, -125, 16]),

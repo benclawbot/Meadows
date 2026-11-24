@@ -120,6 +120,18 @@ h1 {
   pointer-events: none;
   text-align: center;
 }
+.gust-control {
+  position: absolute;
+  right: max(1rem, calc(env(safe-area-inset-right) + 0.5rem));
+  bottom: max(1.1rem, calc(env(safe-area-inset-bottom) + 0.45rem));
+  padding-inline: 1.2rem;
+  min-height: 52px;
+  touch-action: none;
+  user-select: none;
+}
+#gust:not([hidden]) ~ .flight-messages {
+  right: max(6.4rem, calc(env(safe-area-inset-right) + 5.7rem));
+}
 .hint, .level-clear {
   color: var(--ink);
   background: #26372de8;

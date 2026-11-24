@@ -11,11 +11,13 @@ Salt Meadow is a meditative 3D flight game set in a tidal meadow. You steer a br
 
 ### How it plays
 
-Passing a bud opens the flower, adds its colour to your trail, and plays a note that fits the current harmony. Gold flowers sound a harp, warm pinks and whites sound a piano, and lavender and blue add flute. You decide the timing by how you fly.
+Passing a bud opens the flower, lifts colored petals into your trail, and plays a note that fits the current harmony. Gold flowers sound a harp, warm pinks and whites sound a piano, and lavender and blue add flute. You decide the timing by how you fly.
 
 As you make progress through a flight, more instruments join the chamber score and the light warms.
 
-![A trail of gold, coral, and white petals climbing above the tidewater](screenshots/flight.jpg)
+In First Light you can skim the fescue under the pines, follow the tidewater past cattails and sandstone shelves, or climb to see the creek bend below a broken dawn sky. The grass bends as you pass. Petals lift from the flowers, fan out through turns, and settle as you glide.
+
+![A petal trail over the First Light estuary](screenshots/flight.jpg)
 
 ### Flights
 
@@ -38,7 +40,7 @@ Steer upward to explore above the meadow. Centre the controls to glide at altitu
 
 ### Run the source
 
-Requires Node.js 20+ and a WebGL 2 browser.
+Requires Node.js 20.18.3 or later and a WebGL 2 browser.
 
 ```sh
 npm ci
@@ -49,10 +51,13 @@ npm run preview
 
 The build writes a self-contained `dist/index.html`. You can open it directly on desktop or serve it over HTTPS for phone tilt. The local preview listens on loopback.
 
+The editable [First Light scene](art/First-Light.blend) has the sculpted terrain, vegetation and packed materials. The browser build uses Blender’s exported meshes, height grid and sky panorama. Blender is needed only for editing or re-exporting the scene.
+
 ### Credits
 
 The setting, game, and composition are original to Salt Meadow.
 
 - [Three.js](https://github.com/mrdoob/three.js) is MIT-licensed.
+- First Light uses [Poly Haven’s CC0](https://polyhaven.com/license) [coastal dusk](https://polyhaven.com/a/qwantani_sunset_puresky) and [broken-cloud](https://polyhaven.com/a/kloofendal_38d_partly_cloudy_puresky) panoramas, with [turf](https://polyhaven.com/a/aerial_grass_rock) and [stone](https://polyhaven.com/a/coast_land_rocks_01) surface textures.
 - Upright piano, cello, flute, and harp recordings are from [Versilian Studios VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE/tree/440300901dfe9275fd84e0b7763af1f8443ae62e), released under CC0. Simon Dalzell of Ivy Audio recorded the upright piano.
 - [Cormorant Garamond](https://github.com/CatharsisFonts/Cormorant) is by Christian Thalmann and is distributed under the SIL Open Font License in `samples/OFL.txt`.

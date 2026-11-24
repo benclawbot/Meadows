@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { clamp, collectBlooms, flightSurface, stepFlight } from '../src/flight.js';
+import { clamp, collectBlooms, flightSurface, stepFlight, terrain } from '../src/flight.js';
 import { advanceLeg, beginLevel, bloomObjective, canBloom, crossRing, currentLeg, journeyProgress, journeyTarget, levels, nextRing } from '../src/journey.js';
+import { groundBounds, outerGroundHeight } from '../src/landscape.js';
+import firstLight from '../art/first-light.json' with { type: 'json' };
 
 function position(flight, level) {
   return { x: flight.x, y: flightSurface(flight.x, flight.z, level.landscape) + flight.height, z: flight.z };
 }
+
+test('First Light follows the exported Blender triangles under the player', () => {
+  const { x, z, mm } = firstLight;
+  const row = 117, col = 83;
+  const i = row * x.length + col;
+  assert.equal(terrain(x[col], z[row]), mm[i] / 1000);
+  const midpoint = terrain((x[col] + x[col + 1]) / 2, (z[row] + z[row + 1]) / 2);
+  assert.ok(Math.abs(midpoint - (mm[i + 1] + mm[i + x.length]) / 2000) < 1e-10);
+});
 
 test('a flight protects future blooms and advances only after the active stage is complete', () => {
   const journey = beginLevel(5);
@@ -37,6 +48,37 @@ test('Blue After Dark has blue flowers throughout its night glades', () => {
     const red = color >> 16, green = (color >> 8) & 0xff, blue = color & 0xff;
     return blue > green && green > red;
   }));
+});
+
+test('the tidal gorge and sandstone passage carry rings between taller walls', () => {
+  for (const [levelIndex, legIndex, ringIndex, offsetX, offsetZ] of [[2, 0, 2, 12, 0], [5, 3, 2, 0, 11]]) {
+    const { level, legs } = beginLevel(levelIndex);
+    const ring = legs[legIndex].rings[ringIndex];
+    const { landscape } = level;
+    assert.ok(ring.y - flightSurface(ring.x, ring.z, landscape) < 5);
+    for (const side of [-1, 1]) {
+      assert.ok(terrain(ring.x + offsetX * side, ring.z + offsetZ * side, landscape) > ring.y + 2);
+    }
+  }
+});
+
+test('free flight keeps its heading over the alpine peaks and past the detailed terrain', () => {
+  const { flight, level } = beginLevel(4);
+  Object.assign(flight, { x: -63, z: -106, heading: 0 });
+  const gust = { x: 0, y: 0, gust: true };
+  let highestGround = -Infinity;
+  for (let i = 0; i < 840; i++) {
+    stepFlight(flight, gust, 1 / 60);
+    assert.equal(flight.heading, 0);
+    highestGround = Math.max(highestGround, flightSurface(flight.x, flight.z, level.landscape));
+  }
+  assert.ok(highestGround > 65);
+  assert.ok(flight.z < groundBounds.centerZ - groundBounds.depth / 2);
+  assert.equal(flightSurface(flight.x, flight.z, level.landscape), outerGroundHeight);
+
+  const x = flight.x;
+  for (let i = 0; i < 60; i++) stepFlight(flight, { ...gust, x: 1 }, 1 / 60);
+  assert.ok(flight.heading > 1 && flight.x > x + 4);
 });
 
 test('all seven extended routes can be completed at cruising speed using the objective guidance', () => {

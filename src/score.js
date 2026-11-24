@@ -131,12 +131,12 @@ export class MeadowScore {
     const wind = ctx.createBufferSource();
     wind.buffer = air;
     wind.loop = true;
-    const airFilter = ctx.createBiquadFilter();
-    airFilter.type = 'lowpass';
-    airFilter.frequency.value = 490;
+    this.airFilter = ctx.createBiquadFilter();
+    this.airFilter.type = 'lowpass';
+    this.airFilter.frequency.value = 490;
     this.airGain = ctx.createGain();
     this.airGain.gain.value = 0.19;
-    wind.connect(airFilter).connect(this.airGain).connect(this.master);
+    wind.connect(this.airFilter).connect(this.airGain).connect(this.master);
     wind.start();
   }
 
@@ -240,7 +240,8 @@ export class MeadowScore {
     if (!ctx || ctx.state !== 'running' || !this.nextBar) return;
     const now = ctx.currentTime;
     if (Math.abs(gust - this.lastGust) > 0.045) {
-      this.airGain.gain.setTargetAtTime((this.theme?.air ?? 0.16) + gust * 0.17, now, 0.43);
+      this.airGain.gain.setTargetAtTime((this.theme?.air ?? 0.16) + gust * 0.26, now, 0.25);
+      this.airFilter.frequency.setTargetAtTime(490 + gust * 885, now, 0.20);
       this.lastGust = gust;
     }
     if (this.nextBar < now - this.bar) {

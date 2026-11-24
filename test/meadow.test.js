@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectBlooms, FlightPath, makeMeadow, nearbyBloomTurn, newFlight, stepFlight, tiltControl } from '../src/flight.js';
+import { collectBlooms, driftFromBloom, FlightPath, makeMeadow, nearbyBloomTurn, newFlight, stepFlight, tiltControl } from '../src/flight.js';
+import { MeadowWake } from '../src/meadow-wake.js';
 import { BAR, bloomPitch, MeadowScore, score } from '../src/score.js';
 
 test('phone tilt centres on the holding angle and rotates with the screen', () => {
@@ -23,8 +24,56 @@ test('you drift without a gust and can reach the first bloom in a straight pass'
   }
   assert.ok(count >= 1);
   const cruise = flight.speed;
-  for (let i = 0; i < 120; i++) stepFlight(flight, { x: 0, y: 0, gust: true }, 1 / 60);
-  assert.ok(flight.speed > cruise + 3);
+  stepFlight(flight, { x: 0, y: 0, gust: true }, 1 / 60);
+  assert.ok(flight.speed > cruise && flight.speed < cruise + 1);
+  assert.ok(flight.acceleration > 0);
+  for (let i = 1; i < 120; i++) stepFlight(flight, { x: 0, y: 0, gust: true }, 1 / 60);
+  assert.ok(flight.speed > cruise * 3);
+  stepFlight(flight, { x: 0, y: 0, gust: false }, 1 / 60);
+  assert.ok(flight.speed > cruise * 2);
+  assert.ok(flight.acceleration < 0);
+  for (let i = 0; i < 120; i++) stepFlight(flight, { x: 0, y: 0, gust: false }, 1 / 60);
+  assert.ok(flight.speed < cruise + 0.5);
+});
+
+test('a gust parts grass on both sides, follows a turn and fades after climbing', () => {
+  const flight = newFlight();
+  const wake = new MeadowWake();
+  const cruise = new MeadowWake();
+  const cell = wake.span / wake.size;
+  const sample = (field, x, z) => {
+    const col = Math.floor((x - field.x) / cell), row = Math.floor((z - field.z) / cell);
+    const i = (row * field.size + col) * 4;
+    return { x: field.pixels[i] - 128, z: field.pixels[i + 1] - 128, pressure: field.pixels[i + 2] };
+  };
+  const boost = { x: 0, y: 0, gust: true };
+  const glide = { ...flight, z: 0, heading: 0 };
+  Object.assign(flight, { z: 0, heading: 0 });
+  for (let i = 0; i <= 90; i++) {
+    stepFlight(flight, boost, 1 / 60);
+    stepFlight(glide, { ...boost, gust: false }, 1 / 60);
+    wake.update(flight, 1.45, i / 60);
+    cruise.update(glide, 1.45, i / 60);
+  }
+  const left = sample(wake, -1.8, flight.z + 0.8);
+  const right = sample(wake, 1.8, flight.z + 0.8);
+  assert.ok(left.x < -40 && right.x > 40);
+  assert.ok(left.pressure > sample(cruise, -1.8, glide.z + 0.8).pressure);
+  assert.ok(sample(wake, 8, flight.z).pressure === 0);
+  for (let i = 91; i <= 174; i++) {
+    stepFlight(flight, { ...boost, x: 1 }, 1 / 60);
+    wake.update(flight, 1.45, i / 60);
+  }
+  assert.ok(Math.sin(flight.heading) > 0.9);
+  assert.ok(sample(wake, flight.x - 1, flight.z - 1.3).z < 0);
+  assert.ok(sample(wake, flight.x - 1, flight.z + 1.3).z > 0);
+  wake.update(flight, 8, 3.5);
+  assert.ok(sample(wake, flight.x, flight.z).pressure > 0);
+  wake.update(flight, 8, 6);
+  assert.equal(sample(wake, flight.x, flight.z).pressure, 0);
+  wake.reset();
+  wake.update(flight, 8, 0);
+  assert.equal(sample(wake, flight.x, flight.z).pressure, 0);
 });
 
 test('you can climb high, coast at altitude, and return to the blooms', () => {
@@ -49,14 +98,29 @@ test('the breeze gently helps near blooms and stays neutral for blooms behind yo
 test('the petal trail samples by distance and follows the heading of earlier turns', () => {
   const path = new FlightPath(), pose = {};
   for (let i = 0; i < 20; i++) path.add(0, 1, -i * 0.17);
-  for (let i = 1; i < 20; i++) path.add(i * 0.17, 1, -19 * 0.17);
+  for (let i = 1; i < 20; i++) path.add(i * 0.17, 1, -19 * 0.17, 1);
   assert.equal(path.sample(40, pose), false);
   assert.ok(path.sample(0.58, pose));
   assert.ok(Math.abs(pose.x - 2.65) < 0.00001);
   assert.ok(Math.abs(pose.heading - Math.PI / 2) < 0.00001);
+  assert.equal(pose.gust, 1);
+  assert.ok(path.sample(3.23, pose) && pose.turn > 1);
   assert.ok(path.sample(4.12, pose));
   assert.ok(Math.abs(pose.z + 2.34) < 0.00001);
   assert.ok(Math.abs(pose.heading) < 0.00001);
+  assert.equal(pose.gust, 0);
+});
+
+test('a collected petal starts at the bloom, lifts, and joins the ribbon', () => {
+  const flower = { x: 3, y: 1, z: -4 };
+  const ribbon = { x: 5, y: 1.5, z: -7 };
+  const petal = {};
+  driftFromBloom(flower, ribbon, 0, 1, petal);
+  assert.deepEqual(petal, flower);
+  driftFromBloom(flower, ribbon, 0.5, 1, petal);
+  assert.deepEqual(petal, { x: 4, y: 2.25, z: -5.5 });
+  driftFromBloom(flower, ribbon, 1, 1, petal);
+  assert.deepEqual(petal, ribbon);
 });
 
 test('the first glade mixes multiple visible colours and instrument voices', () => {

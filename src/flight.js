@@ -4,6 +4,12 @@ export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const smooth = (from, to, dt, rate) => from + (to - from) * (1 - Math.exp(-rate * dt));
 const radians = Math.PI / 180;
 const upperAir = 42;
+const cruiseSpeed = 3.65;
+const gustSpeed = 11.45;
+
+export function gustStrength(speed) {
+  return clamp((speed - cruiseSpeed) / (gustSpeed - cruiseSpeed), 0, 1);
+}
 
 export function randomFrom(seed) {
   return () => {
@@ -56,7 +62,7 @@ export function makeMeadow(routes, night = false) {
 }
 
 export function newFlight() {
-  return { x: 0, z: 10, height: 1.37, heading: -0.05, steer: 0, rise: 0, speed: 3.65 };
+  return { x: 0, z: 10, height: 1.37, heading: -0.05, steer: 0, rise: 0, speed: cruiseSpeed, acceleration: 0 };
 }
 
 export function curve(value, dead = 0.09) {
@@ -81,22 +87,19 @@ export function tiltControl(reference, reading, angle) {
 export function stepFlight(flight, controls, dt) {
   flight.steer = smooth(flight.steer, controls.x, dt, 5);
   flight.rise = smooth(flight.rise, controls.y, dt, 4.5);
-  flight.speed = smooth(flight.speed, controls.gust ? 7.3 : 3.65, dt, 1.95);
-  flight.heading += flight.steer * dt * 1.18;
+  const lastSpeed = flight.speed;
+  flight.speed = smooth(lastSpeed, controls.gust ? gustSpeed : cruiseSpeed, dt, controls.gust ? 2.55 : 1.48);
+  flight.acceleration = dt > 0 ? (flight.speed - lastSpeed) / dt : 0;
+  flight.heading += flight.steer * dt * (1.18 + gustStrength(flight.speed) * 0.28);
   const vertical = Math.sign(flight.rise) * Math.abs(flight.rise) ** 1.4;
   const climbRate = 5.9 * clamp((upperAir - flight.height) / 9, 0, 1);
   const verticalSpeed = vertical * (vertical > 0 ? climbRate : 6.4);
   flight.height = clamp(flight.height + verticalSpeed * dt, 1.02, upperAir);
   if (Math.abs(flight.rise) < 0.05 && flight.height < 2.9) flight.height = smooth(flight.height, 1.46, dt, 0.34);
 
-  const outside = Math.max(Math.abs(flight.x) - 38, flight.z - 15, -118 - flight.z);
-  if (outside > 0) {
-    const inward = Math.atan2(-flight.x * 0.65, flight.z + 52);
-    const difference = Math.atan2(Math.sin(inward - flight.heading), Math.cos(inward - flight.heading));
-    flight.heading += difference * dt * clamp(outside * 0.18, 0.18, 1.8);
-  }
-  flight.x += Math.sin(flight.heading) * flight.speed * dt;
-  flight.z -= Math.cos(flight.heading) * flight.speed * dt;
+  const distance = (lastSpeed + flight.speed) * 0.5 * dt;
+  flight.x += Math.sin(flight.heading) * distance;
+  flight.z -= Math.cos(flight.heading) * distance;
 }
 
 export function nearbyBloomTurn(meadow, flight, target) {
@@ -123,12 +126,12 @@ export class FlightPath {
   points = [];
   tip = null;
 
-  add(x, y, z) {
+  add(x, y, z, gust = 0) {
     const previous = this.tip;
     const distance = previous
       ? previous.distance + Math.hypot(x - previous.x, y - previous.y, z - previous.z)
       : 0;
-    this.tip = { x, y, z, distance };
+    this.tip = { x, y, z, distance, gust };
     if (!this.points.length || distance - this.points[0].distance >= 0.13) {
       this.points.unshift(this.tip);
       if (this.points.length > 228) this.points.pop();
@@ -151,13 +154,25 @@ export class FlightPath {
     out.x = past.x + (newer.x - past.x) * t;
     out.y = past.y + (newer.y - past.y) * t;
     out.z = past.z + (newer.z - past.z) * t;
+    out.gust = past.gust + (newer.gust - past.gust) * t;
     const ahead = low > 2 ? this.points[low - 3] : this.tip;
     const behindPoint = this.points[Math.min(this.points.length - 1, low + 3)];
     const dx = ahead.x - behindPoint.x, dz = ahead.z - behindPoint.z;
     out.heading = Math.atan2(dx, -dz);
     out.pitch = Math.atan2(ahead.y - behindPoint.y, Math.hypot(dx, dz));
+    const inX = past.x - behindPoint.x, inZ = behindPoint.z - past.z;
+    const outX = ahead.x - past.x, outZ = past.z - ahead.z;
+    out.turn = Math.atan2(inZ * outX - inX * outZ, inX * outX + inZ * outZ);
     return true;
   }
+}
+
+export function driftFromBloom(origin, ribbon, progress, lift, out) {
+  const t = clamp(progress, 0, 1);
+  const glide = t * t * (3 - 2 * t);
+  out.x = origin.x + (ribbon.x - origin.x) * glide;
+  out.y = origin.y + (ribbon.y - origin.y) * glide + lift * Math.sin(Math.PI * t) ** 2;
+  out.z = origin.z + (ribbon.z - origin.z) * glide;
 }
 
 export function collectBlooms(meadow, flight, previousX, previousZ, eligible = () => true) {

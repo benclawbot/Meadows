@@ -3,10 +3,13 @@ import { randomFrom } from './flight.js';
 import { terrain, waterHeight } from './landscape.js';
 
 export const weatherByLandscape = {
+  meadow: { color: 0xf2e7bc, count: 128, speed: -0.12, drift: 0.8, size: 0.09, opacity: 0.38 },
+  marsh: { color: 0xe5e6d9, count: 165, speed: 0.11, drift: 0.91, size: 0.13, opacity: 0.25 },
   heath: { color: 0xdce5ee, count: 530, speed: 13, drift: 3.3, streak: 0.34, opacity: 0.29 },
   alpine: { color: 0xffffff, count: 580, speed: 1.65, drift: 0.91, size: 0.17, opacity: 0.79 },
   dunes: { color: 0xebc48a, count: 310, speed: 0.21, drift: 4.6, size: 0.10, opacity: 0.45 },
   coast: { color: 0xe0f4f4, count: 250, speed: 0.64, drift: 4.9, size: 0.12, opacity: 0.50 },
+  lagoon: { color: 0xb4d7e9, count: 89, speed: -0.09, drift: 0.44, size: 0.11, opacity: 0.37 },
 };
 
 export function makeWeather(profile, landscape, dot, mobile, reduced) {
